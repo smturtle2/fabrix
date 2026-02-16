@@ -11,7 +11,14 @@ from oauth_codex.tooling import build_strict_response_format
 from pydantic import BaseModel
 
 from fabrix.errors import LLMOutputError
-from fabrix.graph.state import FinishState, NextState, ReasoningState, ResponseState, StateEnvelope, ToolCallState
+from fabrix.graph.state import (
+    FinishState,
+    NextState,
+    ReasoningState,
+    ResponseState,
+    StateEnvelope,
+    ToolCallState,
+)
 from fabrix.graph.transitions import allowed_next_states
 from fabrix.types import ReasoningEffort
 
@@ -280,6 +287,12 @@ class OAuthCodexStateProvider:
             "Response rules:\n"
             "- response state is an intermediate user-facing reply.\n"
             "- finish state must include final_output and completion_reason.\n"
+            "Reasoning loop strategy:\n"
+            "- Use Chain-of-Thought-style multi-step planning through short, visible decision traces.\n"
+            "- Keep each reasoning step to 1-2 sentences with one concrete focus.\n"
+            "- If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps.\n"
+            "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
+            "- With a finite step budget, avoid long reasoning-only loops and transition to tool_call/response/finish as confidence grows.\n"
             "\n"
             "Developer instructions:\n"
             f"{self._instructions}\n"

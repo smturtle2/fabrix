@@ -44,15 +44,15 @@ class PlannedToolCall(BaseModel):
 class ReasoningState(BaseState):
     state_type: Literal["reasoning"] = Field(
         default="reasoning",
-        description="Reasoning node: capture internal plan and pick the next state.",
+        description="Reasoning node: record step-level decision trace and pick the next state.",
     )
     reasoning: str = Field(
         min_length=1,
-        description="Concise chain-of-thought style summary for this step.",
+        description="Short 1-2 sentence decision trace summary for this step.",
     )
     focus: str = Field(
         min_length=1,
-        description="Short statement of what this step is trying to achieve.",
+        description="Short, concrete objective for this current step.",
     )
 
 

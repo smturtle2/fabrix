@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from fabrix.agent import Agent
+from fabrix.agent import _DEFAULT_MAX_STEPS, Agent
 from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
@@ -250,7 +250,7 @@ async def test_max_steps_without_response_emits_failure(monkeypatch: pytest.Monk
 
     events = [event async for event in agent.run_task_stream("loop")]
     assert isinstance(events[-1], TaskFailedEvent)
-    assert events[-1].step == 24
+    assert events[-1].step == _DEFAULT_MAX_STEPS
     assert events[-1].error_code == "max_steps_reached"
 
 
@@ -275,7 +275,7 @@ async def test_max_steps_uses_last_response_when_available(monkeypatch: pytest.M
                     reasoning="Still working",
                     focus="continue",
                 )
-                for _ in range(22)
+                for _ in range(_DEFAULT_MAX_STEPS - 2)
             ],
         ],
     )
@@ -288,6 +288,6 @@ async def test_max_steps_uses_last_response_when_available(monkeypatch: pytest.M
 
     events = [event async for event in agent.run_task_stream("loop")]
     assert isinstance(events[-1], TaskFinishedEvent)
-    assert events[-1].step == 24
+    assert events[-1].step == _DEFAULT_MAX_STEPS
     assert events[-1].completion_reason == "max_steps_reached"
     assert events[-1].final_output == "Working on it."

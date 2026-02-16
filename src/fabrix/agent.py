@@ -8,7 +8,7 @@ from fabrix.graph.executor import GraphExecutor
 from fabrix.llm.oauth_codex import DEFAULT_MODEL, OAuthCodexStateProvider
 from fabrix.tools.registry import ToolRegistry
 
-_DEFAULT_MAX_STEPS = 24
+_DEFAULT_MAX_STEPS = 128
 
 
 class Agent:

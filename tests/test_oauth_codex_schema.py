@@ -177,6 +177,28 @@ def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> No
         assert f"- {state.value} -> {allowed}" in prompt
 
 
+def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    prompt = provider._build_prompt(
+        task="hello",
+        context={},
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+
+    assert "Reasoning loop strategy:" in prompt
+    assert "Use Chain-of-Thought-style multi-step planning through short, visible decision traces." in prompt
+    assert "Keep each reasoning step to 1-2 sentences with one concrete focus." in prompt
+    assert "If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps." in prompt
+    assert "Each step must add new evidence or a new decision; do not repeat prior reasoning." in prompt
+    assert (
+        "With a finite step budget, avoid long reasoning-only loops and transition "
+        "to tool_call/response/finish as confidence grows."
+    ) in prompt
+
+
 def test_validate_tool_schemas_rejects_recursive_model(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     tool_schemas = ToolRegistry.from_callables([consume_recursive]).schemas()

@@ -4,16 +4,15 @@ Fabrix is a graph-based agent framework built on top of `oauth-codex>=2.2.0`.
 
 ## Key Features
 
-- Graph-based state transitions
+- Graph-based 4-state execution (`reasoning`, `tool_call`, `response`, `finish`)
 - Structured state outputs via Pydantic
-- Tool execution with strict, tool-specific argument schemas
-- Tool execution with Pydantic parameter validation
-- Async-only, streaming-first API
+- Sequential tool execution
+- Async streaming event API
 
 ## Installation
 
 ```bash
-pip install fabrix
+pip install fabrix-ai
 ```
 
 ## Quickstart
@@ -39,6 +38,7 @@ def add_numbers(payload: AddInput) -> int:
 async def main() -> None:
     agent = Agent(
         instructions="You are a precise assistant.",
+        model="gpt-5.3-codex",
         tools=[add_numbers],
     )
 
@@ -58,12 +58,44 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-See `examples/minimal/quickstart.py` and `examples/advanced/data_workflow.py` for more.
+See `examples/minimal/quickstart.py`, `examples/advanced/data_workflow.py`, and
+`examples/advanced/incident_response.py` for more.
+
+## Public API
+
+- `Agent(instructions, model="gpt-5.3-codex", tools=None)`
+- `run_task_stream(task, context=None)`
+
+Execution defaults are fixed internally:
+
+- `max_steps=24`
+- no per-tool timeout
+
+## Tool Signature Rule
+
+Fabrix accepts tools only in this shape:
+
+```python
+def tool(payload: BaseModel) -> Any: ...
+```
+
+Tool arguments must be a JSON object matching the payload model fields.
+
+## Event Types
+
+- `reasoning`
+- `tool` (`start` / `finish`)
+- `response`
+- `task_finished`
+- `task_failed`
+
+`task_failed` includes:
+
+- `error_code`
+- `message`
 
 ## Notes
 
-- Structured state output is compiled to a Structured Outputs-compatible schema subset.
-- Tool-call items use strict schemas (`anyOf`, no `oneOf`/`const`) for provider compatibility.
-- Every object node is normalized to explicit `properties` + `required` consistency.
-- Map-like `dict[...]` shapes may be narrowed to empty-object constraints for strict compatibility.
-- Define tool parameters with explicit fields (Pydantic models recommended) for reliable validation.
+- Output schema enforces state-specific `next_state` transitions.
+- `tool_call` items allow only `name` and `arguments`.
+- `tool_call` arguments are strictified from each tool parameter schema.

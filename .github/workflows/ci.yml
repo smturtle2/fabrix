@@ -32,3 +32,9 @@ jobs:
 
       - name: Test
         run: pytest
+
+      - name: Build package artifacts
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*

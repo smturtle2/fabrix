@@ -2,28 +2,37 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import date, datetime, time
+from enum import Enum
 from typing import Any
 
 from oauth_codex import OAuthCodexClient
 from oauth_codex.tooling import build_strict_response_format
+from pydantic import BaseModel
 
 from fabrix.errors import LLMOutputError
-from fabrix.graph.state import NextState, StateEnvelope
+from fabrix.graph.state import FinishState, NextState, ReasoningState, ResponseState, StateEnvelope, ToolCallState
 from fabrix.graph.transitions import allowed_next_states
 from fabrix.types import ReasoningEffort
 
-_DISALLOWED_SCHEMA_KEYWORDS = {
-    "oneOf",
-    "allOf",
-    "not",
-    "if",
-    "then",
-    "else",
-    "patternProperties",
-    "const",
+DEFAULT_MODEL = "gpt-5.3-codex"
+
+_UNSUPPORTED_SCHEMA_KEYWORDS = {
     "$ref",
     "$defs",
     "definitions",
+    "oneOf",
+    "const",
+}
+
+_STATE_MODEL_BY_STATE: dict[
+    NextState,
+    type[ReasoningState | ToolCallState | ResponseState | FinishState],
+] = {
+    NextState.reasoning: ReasoningState,
+    NextState.tool_call: ToolCallState,
+    NextState.response: ResponseState,
+    NextState.finish: FinishState,
 }
 
 
@@ -33,13 +42,26 @@ class OAuthCodexStateProvider:
         *,
         instructions: str,
         client: OAuthCodexClient | None = None,
-        model: str = "gpt-5.3-codex",
+        model: str = DEFAULT_MODEL,
         reasoning_effort: ReasoningEffort = "medium",
     ) -> None:
         self._client = client or OAuthCodexClient()
         self._instructions = instructions
         self._model = model
         self._reasoning_effort = reasoning_effort
+
+    def validate_tool_schemas(self, tool_schemas: list[dict[str, Any]]) -> None:
+        if tool_schemas:
+            self._build_output_schema(
+                current_state=NextState.tool_call,
+                tool_schemas=tool_schemas,
+            )
+
+        for state in (NextState.reasoning, NextState.response, NextState.finish):
+            self._build_output_schema(
+                current_state=state,
+                tool_schemas=tool_schemas,
+            )
 
     async def generate_state(
         self,
@@ -97,10 +119,10 @@ class OAuthCodexStateProvider:
             current_state=current_state,
             tool_schemas=tool_schemas,
         )
-        schema = {
+        output_schema = {
             "type": "json_schema",
             "json_schema": {
-                "name": "StateEnvelope",
+                "name": StateEnvelope.__name__,
                 "strict": True,
                 "schema": {
                     "type": "object",
@@ -110,7 +132,7 @@ class OAuthCodexStateProvider:
                 },
             },
         }
-        return self._normalize_and_validate_schema(schema)
+        return self._normalize_schema(output_schema)
 
     def _build_state_schema(
         self,
@@ -118,70 +140,39 @@ class OAuthCodexStateProvider:
         current_state: NextState,
         tool_schemas: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        allowed_next = self._allowed_next_state_values(
+        model_type = _STATE_MODEL_BY_STATE.get(current_state)
+        if model_type is None:
+            raise LLMOutputError(f"unsupported current state: {current_state}")
+
+        strict_format = build_strict_response_format(model_type)
+        schema = strict_format.get("schema")
+        if not isinstance(schema, dict):
+            raise LLMOutputError(f"strict state schema for `{current_state.value}` must be a dict")
+
+        state_schema = copy.deepcopy(self._normalize_schema(schema))
+        properties = state_schema.get("properties")
+        if not isinstance(properties, dict):
+            raise LLMOutputError(f"state schema for `{current_state.value}` missing properties")
+
+        next_state_schema = properties.get("next_state")
+        if not isinstance(next_state_schema, dict):
+            raise LLMOutputError(f"state schema for `{current_state.value}` missing next_state")
+        next_state_schema["enum"] = self._allowed_next_state_values(
             current_state=current_state,
             tool_schemas=tool_schemas,
         )
-        next_state_schema = {"type": "string", "enum": allowed_next}
-
-        if current_state is NextState.reasoning:
-            return {
-                "type": "object",
-                "properties": {
-                    "state_type": {"type": "string", "enum": ["reasoning"]},
-                    "next_state": next_state_schema,
-                    "reasoning": {"type": "string"},
-                    "focus": {"type": "string"},
-                },
-                "required": ["state_type", "next_state", "reasoning", "focus"],
-                "additionalProperties": False,
-            }
 
         if current_state is NextState.tool_call:
             if not tool_schemas:
                 raise LLMOutputError("tool_call state requested but no tools are registered")
-            return {
-                "type": "object",
-                "properties": {
-                    "state_type": {"type": "string", "enum": ["tool_call"]},
-                    "next_state": next_state_schema,
-                    "tool_calls": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {"anyOf": [self._build_tool_call_item_schema(s) for s in tool_schemas]},
-                    },
-                },
-                "required": ["state_type", "next_state", "tool_calls"],
-                "additionalProperties": False,
+            tool_calls_schema = properties.get("tool_calls")
+            if not isinstance(tool_calls_schema, dict):
+                raise LLMOutputError("state schema for `tool_call` missing tool_calls")
+            tool_calls_schema["items"] = {
+                "anyOf": [self._build_tool_call_item_schema(schema) for schema in tool_schemas]
             }
 
-        if current_state is NextState.response:
-            return {
-                "type": "object",
-                "properties": {
-                    "state_type": {"type": "string", "enum": ["response"]},
-                    "next_state": next_state_schema,
-                    "response": {"type": "string"},
-                    "audience": {"type": "string", "enum": ["user", "system"]},
-                },
-                "required": ["state_type", "next_state", "response", "audience"],
-                "additionalProperties": False,
-            }
-
-        if current_state is NextState.finish:
-            return {
-                "type": "object",
-                "properties": {
-                    "state_type": {"type": "string", "enum": ["finish"]},
-                    "next_state": next_state_schema,
-                    "final_output": {"type": "string"},
-                    "completion_reason": {"type": "string"},
-                },
-                "required": ["state_type", "next_state", "final_output", "completion_reason"],
-                "additionalProperties": False,
-            }
-
-        raise LLMOutputError(f"unsupported current state: {current_state}")
+        return self._normalize_schema(state_schema)
 
     def _build_tool_call_item_schema(self, tool_schema: dict[str, Any]) -> dict[str, Any]:
         name = tool_schema.get("name")
@@ -196,22 +187,29 @@ class OAuthCodexStateProvider:
             "type": "object",
             "properties": {
                 "name": {"type": "string", "enum": [name]},
-                "arguments": self._strictify_parameters_schema(parameters),
+                "arguments": self._strictify_parameters_schema(parameters, tool_name=name),
             },
             "required": ["name", "arguments"],
             "additionalProperties": False,
         }
 
-    def _strictify_parameters_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
+    def _strictify_parameters_schema(
+        self,
+        schema: dict[str, Any],
+        *,
+        tool_name: str,
+    ) -> dict[str, Any]:
         if schema.get("type") != "object":
             raise LLMOutputError("tool parameter schema root must be an object")
+
+        schema_name = f"{tool_name}Arguments"
 
         try:
             strict_format = build_strict_response_format(
                 {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "ToolArguments",
+                        "name": schema_name,
                         "schema": copy.deepcopy(schema),
                     },
                 }
@@ -222,131 +220,8 @@ class OAuthCodexStateProvider:
         strict_schema = strict_format.get("schema")
         if not isinstance(strict_schema, dict):
             raise LLMOutputError("strictified tool parameter schema must be a dict")
-        if strict_schema.get("type") != "object":
-            raise LLMOutputError("strictified tool parameter schema root must be an object")
-        if strict_schema.get("additionalProperties") is not False:
-            raise LLMOutputError(
-                "strictified tool parameter schema must set additionalProperties=false"
-            )
 
-        return self._normalize_and_validate_schema(self._inline_local_refs(strict_schema))
-
-    def _inline_local_refs(self, schema: dict[str, Any]) -> dict[str, Any]:
-        root = copy.deepcopy(schema)
-
-        def resolve_pointer(pointer: str) -> dict[str, Any]:
-            if not pointer.startswith("#/"):
-                raise LLMOutputError(f"unsupported $ref pointer: {pointer}")
-
-            target: Any = root
-            for raw_part in pointer[2:].split("/"):
-                part = raw_part.replace("~1", "/").replace("~0", "~")
-                if not isinstance(target, dict) or part not in target:
-                    raise LLMOutputError(f"unresolvable $ref pointer: {pointer}")
-                target = target[part]
-
-            if not isinstance(target, dict):
-                raise LLMOutputError(f"$ref pointer does not resolve to object: {pointer}")
-            return copy.deepcopy(target)
-
-        def walk(node: Any) -> Any:
-            if isinstance(node, dict):
-                ref = node.get("$ref")
-                if isinstance(ref, str):
-                    merged = resolve_pointer(ref)
-                    for key, value in node.items():
-                        if key == "$ref":
-                            continue
-                        merged[key] = walk(value)
-                    return walk(merged)
-
-                out: dict[str, Any] = {}
-                for key, value in node.items():
-                    if key in {"$defs", "definitions"}:
-                        continue
-                    out[key] = walk(value)
-                return out
-
-            if isinstance(node, list):
-                return [walk(item) for item in node]
-
-            return node
-
-        result = walk(root)
-        if not isinstance(result, dict):
-            raise LLMOutputError("inlined schema must be an object")
-        return result
-
-    def _normalize_and_validate_schema(self, schema: Any) -> dict[str, Any]:
-        normalized = self._normalize_schema_subset(schema)
-        self._assert_no_disallowed_keywords(normalized)
-        self._assert_object_required_consistency(normalized)
-        if not isinstance(normalized, dict):
-            raise LLMOutputError("normalized schema must be an object")
-        return normalized
-
-    def _normalize_schema_subset(self, schema: Any) -> Any:
-        if isinstance(schema, dict):
-            normalized: dict[str, Any] = {}
-            for key, value in schema.items():
-                normalized_key = "anyOf" if key == "oneOf" else key
-                if normalized_key == "const":
-                    continue
-                normalized[normalized_key] = self._normalize_schema_subset(value)
-
-            if "const" in schema and "enum" not in normalized:
-                normalized["enum"] = [schema["const"]]
-
-            if normalized.get("type") == "object":
-                properties = normalized.get("properties")
-                if not isinstance(properties, dict):
-                    properties = {}
-                normalized["properties"] = properties
-                normalized["required"] = list(properties.keys())
-                normalized["additionalProperties"] = False
-
-            return normalized
-
-        if isinstance(schema, list):
-            return [self._normalize_schema_subset(item) for item in schema]
-
-        return schema
-
-    def _assert_no_disallowed_keywords(self, schema: Any) -> None:
-        if isinstance(schema, dict):
-            for key, value in schema.items():
-                if key in _DISALLOWED_SCHEMA_KEYWORDS:
-                    raise LLMOutputError(f"schema contains disallowed keyword: {key}")
-                self._assert_no_disallowed_keywords(value)
-            return
-
-        if isinstance(schema, list):
-            for item in schema:
-                self._assert_no_disallowed_keywords(item)
-
-    def _assert_object_required_consistency(self, schema: Any, path: str = "$") -> None:
-        if isinstance(schema, dict):
-            if schema.get("type") == "object":
-                properties = schema.get("properties")
-                required = schema.get("required")
-                if not isinstance(properties, dict):
-                    raise LLMOutputError(f"schema object missing properties at {path}")
-                if not isinstance(required, list):
-                    raise LLMOutputError(f"schema object missing required list at {path}")
-                property_keys = list(properties.keys())
-                if required != property_keys:
-                    raise LLMOutputError(
-                        "schema object required/properties mismatch at "
-                        f"{path}: required={required}, properties={property_keys}"
-                    )
-
-            for key, value in schema.items():
-                self._assert_object_required_consistency(value, f"{path}.{key}")
-            return
-
-        if isinstance(schema, list):
-            for index, item in enumerate(schema):
-                self._assert_object_required_consistency(item, f"{path}[{index}]")
+        return self._normalize_schema(strict_schema)
 
     def _allowed_next_state_values(
         self,
@@ -362,6 +237,13 @@ class OAuthCodexStateProvider:
         if not values:
             raise LLMOutputError(f"no allowed next_state available from {current_state.value}")
         return values
+
+    def _render_graph_rules(self) -> str:
+        lines: list[str] = []
+        for state in NextState:
+            allowed = "|".join(next_state.value for next_state in allowed_next_states(state))
+            lines.append(f"- {state.value} -> {allowed}")
+        return "\n".join(lines)
 
     def _build_prompt(
         self,
@@ -389,10 +271,7 @@ class OAuthCodexStateProvider:
             f"Current node/state_type MUST be `{current_state.value}`.\n"
             f"Allowed next_state values now: {allowed}.\n"
             "Graph rules:\n"
-            "- reasoning -> reasoning|tool_call|response|finish\n"
-            "- tool_call -> reasoning\n"
-            "- response -> reasoning|finish\n"
-            "- finish -> finish\n"
+            f"{self._render_graph_rules()}\n"
             "Tool usage rules:\n"
             "- Use tool_call state only when external computation/data access is needed.\n"
             "- In tool_call state, each arguments object must exactly match selected tool schema.\n"
@@ -407,7 +286,151 @@ class OAuthCodexStateProvider:
             "\n"
             f"Step: {step}\n"
             f"Task: {task}\n"
-            f"Context JSON: {json.dumps(context, ensure_ascii=True)}\n"
-            f"Available tools JSON schema: {json.dumps(tool_schemas, ensure_ascii=True)}\n"
-            f"Execution history JSON: {json.dumps(history[-20:], ensure_ascii=True)}\n"
+            f"Context JSON: {self._json_dumps(context)}\n"
+            f"Available tools JSON schema: {self._json_dumps(tool_schemas)}\n"
+            f"Execution history JSON: {self._json_dumps(history[-20:])}\n"
         )
+
+    @classmethod
+    def _json_dumps(cls, value: Any) -> str:
+        return json.dumps(value, ensure_ascii=True, default=cls._json_default)
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json")
+        if isinstance(value, (datetime, date, time)):
+            return value.isoformat()
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, set):
+            return sorted(value, key=str)
+        return str(value)
+
+    def _normalize_schema(self, schema: Any) -> dict[str, Any]:
+        normalized = self._transform_schema_subset(self._inline_local_refs(schema))
+        self._assert_schema_root_object(normalized)
+        self._assert_no_unsupported_keywords(normalized)
+        self._assert_object_consistency(normalized)
+        if not isinstance(normalized, dict):
+            raise LLMOutputError("normalized schema must be a dict")
+        return normalized
+
+    def _inline_local_refs(self, schema: Any) -> Any:
+        root = copy.deepcopy(schema)
+
+        def resolve_pointer(pointer: str) -> Any:
+            if not pointer.startswith("#/"):
+                raise LLMOutputError(f"unsupported $ref pointer: {pointer}")
+
+            node: Any = root
+            for raw_part in pointer[2:].split("/"):
+                part = raw_part.replace("~1", "/").replace("~0", "~")
+                if not isinstance(node, dict) or part not in node:
+                    raise LLMOutputError(f"unresolvable $ref pointer: {pointer}")
+                node = node[part]
+            return copy.deepcopy(node)
+
+        def walk(node: Any, ref_stack: tuple[str, ...] = ()) -> Any:
+            if isinstance(node, dict):
+                ref = node.get("$ref")
+                if isinstance(ref, str):
+                    if ref in ref_stack:
+                        chain = " -> ".join((*ref_stack, ref))
+                        raise LLMOutputError(f"circular $ref detected: {chain}")
+
+                    target = resolve_pointer(ref)
+                    if not isinstance(target, dict):
+                        raise LLMOutputError(f"$ref pointer does not resolve to object: {ref}")
+
+                    merged = target
+                    for key, value in node.items():
+                        if key == "$ref":
+                            continue
+                        merged[key] = walk(value, ref_stack)
+                    return walk(merged, (*ref_stack, ref))
+
+                return {key: walk(value, ref_stack) for key, value in node.items()}
+
+            if isinstance(node, list):
+                return [walk(item, ref_stack) for item in node]
+
+            return node
+
+        return walk(root)
+
+    def _transform_schema_subset(self, node: Any) -> Any:
+        if isinstance(node, dict):
+            transformed: dict[str, Any] = {}
+            for key, value in node.items():
+                if key in {"$defs", "definitions", "const"}:
+                    continue
+
+                out_key = "anyOf" if key == "oneOf" else key
+                transformed[out_key] = self._transform_schema_subset(value)
+
+            if "const" in node and "enum" not in transformed:
+                transformed["enum"] = [node["const"]]
+
+            if transformed.get("type") == "object":
+                properties = transformed.get("properties")
+                if not isinstance(properties, dict):
+                    properties = {}
+
+                transformed["properties"] = properties
+                transformed["required"] = list(properties.keys())
+                transformed["additionalProperties"] = False
+
+            return transformed
+
+        if isinstance(node, list):
+            return [self._transform_schema_subset(item) for item in node]
+
+        return node
+
+    def _assert_no_unsupported_keywords(self, node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _UNSUPPORTED_SCHEMA_KEYWORDS:
+                    raise LLMOutputError(f"schema contains unsupported keyword: {key}")
+                self._assert_no_unsupported_keywords(value)
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                self._assert_no_unsupported_keywords(item)
+
+    def _assert_object_consistency(self, node: Any, path: str = "$") -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                properties = node.get("properties")
+                required = node.get("required")
+                additional_properties = node.get("additionalProperties")
+
+                if not isinstance(properties, dict):
+                    raise LLMOutputError(f"object schema missing properties at {path}")
+                if not isinstance(required, list):
+                    raise LLMOutputError(f"object schema missing required list at {path}")
+                if required != list(properties.keys()):
+                    raise LLMOutputError(
+                        f"object schema required/properties mismatch at {path}: {required} vs {list(properties.keys())}"
+                    )
+                if additional_properties is not False:
+                    raise LLMOutputError(
+                        f"object schema must set additionalProperties=false at {path}"
+                    )
+
+            for key, value in node.items():
+                self._assert_object_consistency(value, f"{path}.{key}")
+            return
+
+        if isinstance(node, list):
+            for idx, item in enumerate(node):
+                self._assert_object_consistency(item, f"{path}[{idx}]")
+
+    @staticmethod
+    def _assert_schema_root_object(schema: Any) -> None:
+        if not isinstance(schema, dict):
+            raise LLMOutputError("schema root must be an object")

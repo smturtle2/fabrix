@@ -87,8 +87,8 @@ async def main() -> None:
             "After render_report succeeds, immediately emit finish state with final_output "
             "equal to render_report output."
         ),
+        model="gpt-5.3-codex",
         tools=[clean_records, aggregate_by_category, render_report],
-        max_steps=14,
     )
 
     task = "Analyze context.raw_rows and produce a category-level report."

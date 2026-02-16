@@ -3,14 +3,12 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from oauth_codex import OAuthCodexClient
-
-from fabrix.config import AgentConfig
 from fabrix.events.models import AgentEvent
 from fabrix.graph.executor import GraphExecutor
-from fabrix.llm import StateProvider
-from fabrix.llm.oauth_codex import OAuthCodexStateProvider
+from fabrix.llm.oauth_codex import DEFAULT_MODEL, OAuthCodexStateProvider
 from fabrix.tools.registry import ToolRegistry
+
+_DEFAULT_MAX_STEPS = 24
 
 
 class Agent:
@@ -18,32 +16,21 @@ class Agent:
         self,
         *,
         instructions: str,
+        model: str = DEFAULT_MODEL,
         tools: list[Callable[..., Any]] | None = None,
-        model: str = "gpt-5.3-codex",
-        max_steps: int = 24,
-        reasoning_effort: str = "medium",
-        client: OAuthCodexClient | None = None,
-        state_provider: StateProvider | None = None,
     ) -> None:
-        self.config = AgentConfig(
-            instructions=instructions,
-            model=model,
-            max_steps=max_steps,
-            reasoning_effort=reasoning_effort,
-        )
         self.tool_registry = ToolRegistry.from_callables(tools)
 
-        provider = state_provider or OAuthCodexStateProvider(
-            instructions=self.config.instructions,
-            client=client,
-            model=self.config.model,
-            reasoning_effort=self.config.reasoning_effort,
+        provider = OAuthCodexStateProvider(
+            instructions=instructions,
+            model=model,
         )
+        provider.validate_tool_schemas(self.tool_registry.schemas())
 
         self._executor = GraphExecutor(
             state_provider=provider,
             tool_registry=self.tool_registry,
-            max_steps=self.config.max_steps,
+            max_steps=_DEFAULT_MAX_STEPS,
         )
 
     async def run_task_stream(

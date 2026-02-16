@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fabrix-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Graph-based agent framework powered by oauth-codex"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,9 +27,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/fabrix"
-Repository = "https://github.com/your-org/fabrix"
-Issues = "https://github.com/your-org/fabrix/issues"
+Homepage = "https://github.com/smturtle2/fabrix"
+Repository = "https://github.com/smturtle2/fabrix"
+Issues = "https://github.com/smturtle2/fabrix/issues"
 
 [project.optional-dependencies]
 dev = [

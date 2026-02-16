@@ -30,6 +30,7 @@ async def main() -> None:
             "Solve the task accurately. Prefer tool usage for arithmetic tasks. "
             "When done, return finish state with concise final_output."
         ),
+        model="gpt-5.3-codex",
         tools=[add_numbers],
     )
 

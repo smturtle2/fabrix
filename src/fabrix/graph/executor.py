@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -66,9 +65,7 @@ class GraphExecutor:
                 yield TaskFailedEvent(
                     step=step,
                     error_code="invalid_state_type",
-                    message=(
-                        f"expected state_type `{current_state.value}`, got `{state.state_type}`"
-                    ),
+                    message=f"expected state_type `{current_state.value}`, got `{state.state_type}`",
                 )
                 return
 
@@ -92,15 +89,10 @@ class GraphExecutor:
                 )
 
             if isinstance(state, ToolCallState):
-                started_calls: dict[int, tuple[str, str, dict[str, Any]]] = {}
-                results_by_index: dict[int, ToolExecutionResult] = {}
-                pending_tasks: dict[int, asyncio.Task[ToolExecutionResult]] = {}
-
                 for idx, call in enumerate(state.tool_calls, start=1):
                     call_id = call.call_id or f"s{step}_c{idx}"
                     raw_arguments: Any = call.arguments
                     arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
-                    started_calls[idx] = (call.name, call_id, arguments)
 
                     yield ToolEvent(
                         step=step,
@@ -112,39 +104,16 @@ class GraphExecutor:
 
                     spec = self._tool_registry.get(call.name)
                     if not isinstance(raw_arguments, dict):
-                        results_by_index[idx] = self._tool_failure_result(
-                            "tool arguments must be a JSON object"
-                        )
-                        continue
-                    if spec is None:
-                        results_by_index[idx] = self._tool_failure_result(
-                            f"tool not found: {call.name}"
-                        )
-                        continue
+                        result = self._tool_failure_result("tool arguments must be a JSON object")
+                    elif spec is None:
+                        result = self._tool_failure_result(f"tool not found: {call.name}")
+                    else:
+                        result = await execute_tool(spec, raw_arguments)
 
-                    pending_tasks[idx] = asyncio.create_task(execute_tool(spec, raw_arguments))
-
-                if pending_tasks:
-                    pending_indexes = tuple(pending_tasks.keys())
-                    gathered = await asyncio.gather(
-                        *(pending_tasks[idx] for idx in pending_indexes),
-                        return_exceptions=True,
-                    )
-                    for idx, result in zip(pending_indexes, gathered, strict=True):
-                        if isinstance(result, Exception):
-                            results_by_index[idx] = self._tool_failure_result(
-                                str(result) or result.__class__.__name__
-                            )
-                        else:
-                            results_by_index[idx] = result
-
-                for idx in sorted(started_calls):
-                    tool_name, call_id, arguments = started_calls[idx]
-                    result = results_by_index[idx]
                     yield ToolEvent(
                         step=step,
                         phase="finish",
-                        tool_name=tool_name,
+                        tool_name=call.name,
                         call_id=call_id,
                         arguments=arguments,
                         result=result,
@@ -153,7 +122,7 @@ class GraphExecutor:
                         {
                             "kind": "tool_result",
                             "step": step,
-                            "tool_name": tool_name,
+                            "tool_name": call.name,
                             "call_id": call_id,
                             "ok": result.ok,
                             "output": result.output,
@@ -176,10 +145,18 @@ class GraphExecutor:
 
             current_state = state.next_state
 
-        yield TaskFinishedEvent(
+        if last_response:
+            yield TaskFinishedEvent(
+                step=self._max_steps,
+                final_output=last_response,
+                completion_reason="max_steps_reached",
+            )
+            return
+
+        yield TaskFailedEvent(
             step=self._max_steps,
-            final_output=last_response,
-            completion_reason="max_steps_reached",
+            error_code="max_steps_reached",
+            message="max_steps reached before producing a response or final output",
         )
 
     @staticmethod

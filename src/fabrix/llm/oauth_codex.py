@@ -288,7 +288,7 @@ class OAuthCodexStateProvider:
             f"Task: {task}\n"
             f"Context JSON: {self._json_dumps(context)}\n"
             f"Available tools JSON schema: {self._json_dumps(tool_schemas)}\n"
-            f"Execution history JSON: {self._json_dumps(history[-20:])}\n"
+            f"Execution history JSON: {self._json_dumps(history)}\n"
         )
 
     @classmethod

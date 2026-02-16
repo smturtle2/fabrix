@@ -64,7 +64,7 @@ Parameter behavior:
 
 Notes:
 
-- Execution defaults are fixed internally: `max_steps=24`.
+- Execution defaults are fixed internally: `max_steps=128`.
 - There is no public constructor parameter for per-tool timeout.
 - Incompatible tool schemas fail fast during agent setup.
 
@@ -158,6 +158,8 @@ Event-specific fields:
 | `task_finished` | `TaskFinishedEvent` | `final_output`, `completion_reason` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
 
+`ReasoningEvent.reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
+
 `ToolEvent.result` is populated on `phase="finish"` and includes:
 
 - `ok: bool`
@@ -173,7 +175,7 @@ Current `error_code` values include:
 - `llm_error`: model/provider failed to produce a valid structured state.
 - `invalid_state_type`: model returned a state type different from expected current state.
 - `invalid_transition`: state transition violated graph rules.
-- `max_steps_reached`: no response/final output was produced by step 24.
+- `max_steps_reached`: no response/final output was produced by step 128.
 
 Tool call failures are non-terminal by themselves and are emitted on `ToolEvent(phase="finish")` with `result.ok == False`.
 Common tool errors include:

@@ -64,7 +64,7 @@ Agent(
 
 참고:
 
-- 실행 기본값은 내부 고정값이며 `max_steps=24`입니다.
+- 실행 기본값은 내부 고정값이며 `max_steps=128`입니다.
 - public 생성자에 per-tool timeout 파라미터는 없습니다.
 - 호환되지 않는 tool schema는 에이전트 생성 시 즉시 실패합니다.
 
@@ -158,6 +158,8 @@ async for event in agent.run_task_stream("Use add_numbers to compute 3 + 9"):
 | `task_finished` | `TaskFinishedEvent` | `final_output`, `completion_reason` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
 
+`ReasoningEvent.reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace / plan summary입니다.
+
 `ToolEvent.result`는 `phase="finish"`에서 채워지며 다음 필드를 포함합니다.
 
 - `ok: bool`
@@ -173,7 +175,7 @@ async for event in agent.run_task_stream("Use add_numbers to compute 3 + 9"):
 - `llm_error`: 모델/provider가 유효한 구조화 상태를 생성하지 못함
 - `invalid_state_type`: 모델이 현재 기대 상태와 다른 state type을 반환함
 - `invalid_transition`: 상태 전이가 그래프 규칙을 위반함
-- `max_steps_reached`: 24단계 내에 response/final output이 생성되지 않음
+- `max_steps_reached`: 128단계 내에 response/final output이 생성되지 않음
 
 tool 호출 실패는 단독으로 종료 조건이 아니며 `ToolEvent(phase="finish")`에서 `result.ok == False`로 전달됩니다.
 일반적인 tool 오류:

@@ -101,6 +101,8 @@ def tool(payload: BaseModel) -> Any: ...
 - `task_finished`
 - `task_failed`
 
+`reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace / plan summary입니다.
+
 일반적인 흐름:
 
 1. `reasoning`
@@ -123,6 +125,6 @@ def tool(payload: BaseModel) -> Any: ...
 ## 참고 사항
 
 - 공개 런타임 진입점은 `fabrix.Agent`입니다.
-- 실행 기본값은 내부 고정값입니다: `max_steps=24`, public per-tool timeout 옵션 없음.
+- 실행 기본값은 내부 고정값입니다: `max_steps=128`, public per-tool timeout 옵션 없음.
 - `max_steps`에 도달했을 때 최소 1회 `response`가 있었으면 마지막 응답으로 `task_finished`를 내보내며 `completion_reason="max_steps_reached"`를 설정합니다.
 - 응답/최종 출력 없이 `max_steps`에 도달하면 `task_failed`와 `error_code="max_steps_reached"`로 종료됩니다.

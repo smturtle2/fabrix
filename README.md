@@ -101,6 +101,8 @@ def tool(payload: BaseModel) -> Any: ...
 - `task_finished`
 - `task_failed`
 
+`reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
+
 Typical flow:
 
 1. `reasoning`
@@ -123,6 +125,6 @@ Typical flow:
 ## Notes
 
 - Public runtime entry point is `fabrix.Agent`.
-- Execution defaults are fixed internally: `max_steps=24` and no public per-tool timeout option.
+- Execution defaults are fixed internally: `max_steps=128` and no public per-tool timeout option.
 - If `max_steps` is reached and at least one `response` was emitted, the stream ends with `task_finished` (`completion_reason="max_steps_reached"`) using the last response.
 - If `max_steps` is reached before any response/final output, the stream ends with `task_failed` (`error_code="max_steps_reached"`).

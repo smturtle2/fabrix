@@ -77,6 +77,24 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Image Input
+
+`run_task_stream(...)` accepts multimodal inputs:
+
+- `task`: `str | None`
+- `images`: `str | Path | bytes | list[...]`
+- At least one of `task` or `images` is required.
+
+Image-only example:
+
+```python
+async for event in agent.run_task_stream(
+    task=None,
+    images=["https://example.com/screenshot.png"],
+):
+    ...
+```
+
 ## Tool Contract
 
 Fabrix accepts tools in this shape:

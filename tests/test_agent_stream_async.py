@@ -72,6 +72,90 @@ def test_agent_rejects_removed_init_parameters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_rejects_when_task_and_images_missing() -> None:
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    with pytest.raises(ValueError, match="Either task or images must be provided"):
+        async for _event in agent.run_task_stream():
+            pass
+
+
+@pytest.mark.asyncio
+async def test_stream_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_provider_states(
+        monkeypatch,
+        [
+            ReasoningState(
+                next_state=NextState.finish,
+                reasoning="Analyze the image first",
+                focus="visual inspection",
+            ),
+            FinishState(
+                next_state=NextState.finish,
+                final_output="image analyzed",
+                completion_reason="done",
+            ),
+        ],
+    )
+
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    events = [
+        event
+        async for event in agent.run_task_stream(task=None, images=[b"\x89PNG\r\n\x1a\n\x00"])
+    ]
+    assert isinstance(events[-1], TaskFinishedEvent)
+    assert events[-1].final_output == "image analyzed"
+
+
+@pytest.mark.asyncio
+async def test_stream_forwards_images_to_state_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_generate_state(self, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(kwargs)
+        if kwargs["current_state"] == NextState.reasoning:
+            return StateEnvelope(
+                state=ReasoningState(
+                    next_state=NextState.finish,
+                    reasoning="ready",
+                    focus="finish soon",
+                )
+            )
+        return StateEnvelope(
+            state=FinishState(
+                next_state=NextState.finish,
+                final_output="done",
+                completion_reason="done",
+            )
+        )
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "generate_state", fake_generate_state)
+
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    images = ["https://example.com/input.png"]
+    events = [event async for event in agent.run_task_stream(task=None, images=images)]
+
+    assert isinstance(events[-1], TaskFinishedEvent)
+    assert calls
+    assert calls[0]["task"] is None
+    assert calls[0]["images"] == images
+
+
+@pytest.mark.asyncio
 async def test_stream_emits_events_in_expected_order(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_provider_states(
         monkeypatch,

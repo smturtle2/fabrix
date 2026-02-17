@@ -97,15 +97,19 @@ def tool(payload: BaseModel) -> Any: ...
 
 ```python
 run_task_stream(
-    task: str,
+    task: str | None = None,
     *,
+    images: ImageInput | list[ImageInput] | None = None,
     context: dict[str, Any] | None = None,
 ) -> AsyncIterator[AgentEvent]
 ```
 
 사용 시 참고:
 
-- `task`는 사용자 작업 문자열입니다.
+- `task`는 선택적인 사용자 작업 텍스트입니다.
+- `images`는 선택사항이며 `str | Path | bytes`(단일 또는 리스트)를 지원합니다.
+- `task` 또는 `images` 중 최소 하나는 반드시 제공해야 합니다.
+- `bytes` 입력은 모델 호출 전에 data URL로 변환됩니다.
 - `context`는 각 단계에서 모델에 전달되는 선택적 구조화 데이터입니다.
 - 스트림은 종료 이벤트가 발생할 때까지 이벤트를 순차적으로 반환합니다.
 
@@ -115,6 +119,16 @@ run_task_stream(
 async for event in agent.run_task_stream(
     "Analyze context.raw_rows and return a summary",
     context={"raw_rows": [{"category": "A", "value": 3.2}]},
+):
+    ...
+```
+
+이미지 단독 예시:
+
+```python
+async for event in agent.run_task_stream(
+    task=None,
+    images=["https://example.com/incident.png"],
 ):
     ...
 ```
@@ -257,6 +271,8 @@ asyncio.run(main())
   모델이 생성한 인자 키가 payload 모델 필드명과 정확히 일치하는지 확인하세요.
 - `tool arguments must be a JSON object`:
   tool 인자가 object 형태 JSON인지 확인하세요.
+- `ValueError: Either task or images must be provided`:
+  `run_task_stream(...)` 호출 시 `task` 또는 `images`를 하나 이상 제공하세요.
 - `task_failed` + `invalid_transition`:
   모델이 허용 전이를 따르도록 지시문을 더 구체화하세요.
 - `task_failed` + `llm_error`:

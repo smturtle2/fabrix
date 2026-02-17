@@ -105,6 +105,7 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
 
     await provider.generate_state(
         task="hello",
+        images=None,
         context={},
         history=[],
         current_state=NextState.reasoning,
@@ -123,6 +124,7 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
 
     await provider.generate_state(
         task="hello",
+        images=None,
         context={},
         history=[],
         current_state=NextState.reasoning,
@@ -141,6 +143,7 @@ async def test_provider_prompt_serializes_non_json_values(fake_client: Any) -> N
 
     await provider.generate_state(
         task="hello",
+        images=None,
         context={"issued_at": now},
         history=[
             {
@@ -165,6 +168,7 @@ def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> No
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     prompt = provider._build_prompt(
         task="hello",
+        images=[],
         context={},
         history=[],
         current_state=NextState.reasoning,
@@ -181,6 +185,7 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     prompt = provider._build_prompt(
         task="hello",
+        images=[],
         context={},
         history=[],
         current_state=NextState.reasoning,
@@ -197,6 +202,68 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
         "With a finite step budget, avoid long reasoning-only loops and transition "
         "to tool_call/response/finish as confidence grows."
     ) in prompt
+    assert "If Task is [not provided], infer user intent from images and context before choosing next_state." in prompt
+
+
+@pytest.mark.asyncio
+async def test_provider_passes_images_to_client_when_task_is_none(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    images = ["https://example.com/image.png"]
+
+    await provider.generate_state(
+        task=None,
+        images=images,
+        context={},
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+
+    assert fake_client.calls[-1]["images"] == images
+    assert "Task: [not provided]" in fake_client.calls[-1]["prompt"]
+
+
+def test_provider_converts_bytes_image_to_data_url_with_detected_mime(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+
+    normalized = provider._normalize_images(
+        [
+            b"\x89PNG\r\n\x1a\n\x00",
+            b"\xff\xd8\xff\xe0\x00",
+            b"GIF89a\x00",
+            b"RIFF\x01\x02\x03\x04WEBP\x00",
+        ]
+    )
+
+    assert isinstance(normalized[0], str) and normalized[0].startswith("data:image/png;base64,")
+    assert isinstance(normalized[1], str) and normalized[1].startswith("data:image/jpeg;base64,")
+    assert isinstance(normalized[2], str) and normalized[2].startswith("data:image/gif;base64,")
+    assert isinstance(normalized[3], str) and normalized[3].startswith("data:image/webp;base64,")
+
+
+def test_provider_bytes_mime_fallback_to_octet_stream(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    normalized = provider._normalize_images([b"\x00\x01\x02"])
+
+    assert isinstance(normalized[0], str)
+    assert normalized[0].startswith("data:application/octet-stream;base64,")
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_invalid_image_item_type(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+
+    with pytest.raises(TypeError, match="images items must be str/Path/bytes"):
+        await provider.generate_state(
+            task="hello",
+            images=[123],  # type: ignore[list-item]
+            context={},
+            history=[],
+            current_state=NextState.reasoning,
+            step=1,
+            tool_schemas=[],
+        )
 
 
 def test_validate_tool_schemas_rejects_recursive_model(fake_client: Any) -> None:

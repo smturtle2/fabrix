@@ -97,15 +97,19 @@ Method signature:
 
 ```python
 run_task_stream(
-    task: str,
+    task: str | None = None,
     *,
+    images: ImageInput | list[ImageInput] | None = None,
     context: dict[str, Any] | None = None,
 ) -> AsyncIterator[AgentEvent]
 ```
 
 Usage notes:
 
-- `task` is the user task string.
+- `task` is optional user task text.
+- `images` is optional and accepts `str | Path | bytes` (single item or list).
+- At least one of `task` or `images` must be provided.
+- When `bytes` are provided, Fabrix converts them into data URLs before model call.
 - `context` is optional structured data exposed to the model each step.
 - The stream yields events until a terminal event is emitted.
 
@@ -115,6 +119,16 @@ Example:
 async for event in agent.run_task_stream(
     "Analyze context.raw_rows and return a summary",
     context={"raw_rows": [{"category": "A", "value": 3.2}]},
+):
+    ...
+```
+
+Image-only example:
+
+```python
+async for event in agent.run_task_stream(
+    task=None,
+    images=["https://example.com/incident.png"],
 ):
     ...
 ```
@@ -257,6 +271,8 @@ asyncio.run(main())
   Ensure model-generated arguments exactly match payload model field names.
 - `tool arguments must be a JSON object`:
   Ensure tool call arguments are object-shaped JSON.
+- `ValueError: Either task or images must be provided`:
+  Provide `task`, `images`, or both when calling `run_task_stream(...)`.
 - `task_failed` with `invalid_transition`:
   Tighten instructions so the model follows allowed graph transitions.
 - `task_failed` with `llm_error`:

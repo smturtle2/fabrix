@@ -16,6 +16,7 @@ from fabrix.graph.transitions import validate_transition
 from fabrix.llm import StateProvider
 from fabrix.tools.registry import ToolRegistry
 from fabrix.tools.runtime import ToolExecutionResult, execute_tool
+from fabrix.types import ImageInput
 
 
 class GraphExecutor:
@@ -33,7 +34,8 @@ class GraphExecutor:
     async def run_stream(
         self,
         *,
-        task: str,
+        task: str | None,
+        images: ImageInput | list[ImageInput] | None = None,
         context: dict[str, Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         payload = context or {}
@@ -46,6 +48,7 @@ class GraphExecutor:
             try:
                 envelope = await self._state_provider.generate_state(
                     task=task,
+                    images=images,
                     context=payload,
                     history=history,
                     current_state=current_state,

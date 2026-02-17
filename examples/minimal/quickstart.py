@@ -34,8 +34,12 @@ async def main() -> None:
         tools=[add_numbers],
     )
 
+    # Optional multimodal input (URL, local path, data URL, or raw bytes).
+    image_inputs = None
+
     async for event in agent.run_task_stream(
-        "Use add_numbers to compute 38 + 4 and explain briefly."
+        "Use add_numbers to compute 38 + 4 and explain briefly.",
+        images=image_inputs,
     ):
         print(f"[step={event.step}] {event.event_type}")
 

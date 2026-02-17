@@ -77,6 +77,24 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## 이미지 입력
+
+`run_task_stream(...)`은 멀티모달 입력을 지원합니다.
+
+- `task`: `str | None`
+- `images`: `str | Path | bytes | list[...]`
+- `task` 또는 `images` 중 최소 하나가 필요합니다.
+
+이미지 단독 예시:
+
+```python
+async for event in agent.run_task_stream(
+    task=None,
+    images=["https://example.com/screenshot.png"],
+):
+    ...
+```
+
 ## Tool 계약
 
 Fabrix는 아래 형태의 도구를 허용합니다.

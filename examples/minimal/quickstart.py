@@ -13,6 +13,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import TextMessage
+from fabrix.tools import ToolOutput
 
 
 class AddInput(BaseModel):
@@ -20,9 +21,9 @@ class AddInput(BaseModel):
     b: int = Field(ge=-10_000, le=10_000)
 
 
-def add_numbers(payload: AddInput) -> dict[str, int]:
+def add_numbers(payload: AddInput) -> ToolOutput:
     """Add two integers and return the sum."""
-    return {"sum": payload.a + payload.b}
+    return ToolOutput.json({"sum": payload.a + payload.b})
 
 
 async def main() -> None:

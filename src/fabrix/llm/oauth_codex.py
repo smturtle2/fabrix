@@ -94,7 +94,11 @@ class OAuthCodexStateProvider:
 
         try:
             payload = await self._client.agenerate(
-                messages=self._build_model_messages(prompt=prompt, messages=messages),
+                messages=self._build_model_messages(
+                    prompt=prompt,
+                    messages=messages,
+                    history=history,
+                ),
                 model=self._model,
                 reasoning_effort=self._reasoning_effort,
                 output_schema=output_schema,
@@ -325,8 +329,13 @@ class OAuthCodexStateProvider:
         *,
         prompt: str,
         messages: list[TextMessage | ImageMessage],
+        history: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        return [{"role": "system", "content": prompt}, *self._serialize_messages(messages)]
+        return [
+            {"role": "system", "content": prompt},
+            *self._serialize_messages(messages),
+            *self._serialize_history_messages(history),
+        ]
 
     def _serialize_messages(self, messages: list[TextMessage | ImageMessage]) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
@@ -335,6 +344,70 @@ class OAuthCodexStateProvider:
                 raise TypeError("messages must contain TextMessage/ImageMessage objects")
             serialized.append(to_oauth_message(message))
         return serialized
+
+    def _serialize_history_messages(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        serialized: list[dict[str, Any]] = []
+        for item in history:
+            if not isinstance(item, dict) or item.get("kind") != "tool_result":
+                continue
+            message = self._serialize_tool_result_history(item)
+            if message is not None:
+                serialized.append(message)
+        return serialized
+
+    def _serialize_tool_result_history(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        step = item.get("step")
+        tool_name = item.get("tool_name")
+        call_id = item.get("call_id")
+        ok = item.get("ok")
+
+        if ok is not True:
+            error = item.get("error")
+            summary = (
+                f"tool_result step={step} tool={tool_name} call_id={call_id} "
+                f"ok=False error={error or 'unknown'}"
+            )
+            return {"role": "user", "content": [{"type": "input_text", "text": summary}]}
+
+        parts: list[dict[str, str]] = [
+            {
+                "type": "input_text",
+                "text": f"tool_result step={step} tool={tool_name} call_id={call_id} ok=True",
+            }
+        ]
+        output = item.get("output")
+        if isinstance(output, dict):
+            output_parts = output.get("parts")
+            if isinstance(output_parts, list):
+                for output_part in output_parts:
+                    if not isinstance(output_part, dict):
+                        continue
+                    part_type = output_part.get("type")
+                    if part_type == "text":
+                        text = output_part.get("text")
+                        if isinstance(text, str) and text:
+                            parts.append({"type": "input_text", "text": text})
+                        continue
+                    if part_type == "json":
+                        parts.append(
+                            {
+                                "type": "input_text",
+                                "text": self._json_dumps(output_part.get("data")),
+                            }
+                        )
+                        continue
+                    if part_type == "image":
+                        caption = output_part.get("caption")
+                        if isinstance(caption, str) and caption.strip():
+                            parts.append({"type": "input_text", "text": caption})
+                        image_url = output_part.get("image_url")
+                        if isinstance(image_url, str) and image_url:
+                            parts.append({"type": "input_image", "image_url": image_url})
+                return {"role": "user", "content": parts}
+
+        if output is not None:
+            parts.append({"type": "input_text", "text": self._json_dumps(output)})
+        return {"role": "user", "content": parts}
 
     def _normalize_schema(self, schema: Any) -> dict[str, Any]:
         normalized = self._transform_schema_subset(self._inline_local_refs(schema))

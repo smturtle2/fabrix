@@ -14,6 +14,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import TextMessage
+from fabrix.tools import ToolOutput
 
 RAW_ALERTS = [
     {
@@ -87,7 +88,7 @@ class SummarizeAlertsInput(BaseModel):
     alerts: list[Alert] = Field(min_length=1)
 
 
-def summarize_alerts(payload: SummarizeAlertsInput) -> list[dict[str, int | str]]:
+def summarize_alerts(payload: SummarizeAlertsInput) -> ToolOutput:
     """Rank services by incident pressure score from raw alerts."""
     buckets: dict[str, dict[str, int]] = {}
     for alert in payload.alerts:
@@ -122,7 +123,7 @@ def summarize_alerts(payload: SummarizeAlertsInput) -> list[dict[str, int | str]
             }
         )
     ranked.sort(key=lambda row: (-int(row["score"]), -int(row["users_affected"]), str(row["service"])))
-    return ranked
+    return ToolOutput.json(ranked)
 
 
 class RankedService(BaseModel):
@@ -138,7 +139,7 @@ class ChooseIncidentInput(BaseModel):
     ranked_services: list[RankedService] = Field(min_length=1)
 
 
-def choose_primary_incident(payload: ChooseIncidentInput) -> dict[str, int | str]:
+def choose_primary_incident(payload: ChooseIncidentInput) -> ToolOutput:
     """Pick the highest-pressure service and derive severity."""
     top = payload.ranked_services[0]
     if top.score >= 14 or top.users_affected >= 3000:
@@ -148,21 +149,23 @@ def choose_primary_incident(payload: ChooseIncidentInput) -> dict[str, int | str
     else:
         severity = "SEV-3"
 
-    return {
-        "service": top.service,
-        "severity": severity,
-        "users_affected": top.users_affected,
-        "reason": (
-            f"errors={top.errors}, degraded={top.degraded}, users={top.users_affected}, score={top.score}"
-        ),
-    }
+    return ToolOutput.json(
+        {
+            "service": top.service,
+            "severity": severity,
+            "users_affected": top.users_affected,
+            "reason": (
+                f"errors={top.errors}, degraded={top.degraded}, users={top.users_affected}, score={top.score}"
+            ),
+        }
+    )
 
 
 class DependenciesInput(BaseModel):
     service: str = Field(min_length=1)
 
 
-def fetch_service_dependencies(payload: DependenciesInput) -> dict[str, list[str] | str]:
+def fetch_service_dependencies(payload: DependenciesInput) -> ToolOutput:
     """Return known dependencies and coarse blast-radius tier."""
     dependencies = SERVICE_DEPENDENCIES.get(payload.service, [])
     if len(dependencies) >= 3:
@@ -171,11 +174,13 @@ def fetch_service_dependencies(payload: DependenciesInput) -> dict[str, list[str
         blast_radius = "medium"
     else:
         blast_radius = "low"
-    return {
-        "service": payload.service,
-        "dependencies": dependencies,
-        "blast_radius": blast_radius,
-    }
+    return ToolOutput.json(
+        {
+            "service": payload.service,
+            "dependencies": dependencies,
+            "blast_radius": blast_radius,
+        }
+    )
 
 
 class BuildPlanInput(BaseModel):
@@ -185,7 +190,7 @@ class BuildPlanInput(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
 
 
-def build_mitigation_plan(payload: BuildPlanInput) -> dict[str, int | str | list[str]]:
+def build_mitigation_plan(payload: BuildPlanInput) -> ToolOutput:
     """Build a short, deterministic mitigation plan for the selected service."""
     owner = ONCALL_OWNERS.get(payload.service, "platform-oncall")
     eta_by_severity = {"SEV-1": 20, "SEV-2": 45, "SEV-3": 90}
@@ -198,12 +203,14 @@ def build_mitigation_plan(payload: BuildPlanInput) -> dict[str, int | str | list
         actions.append(f"Check dependency health: {', '.join(payload.dependencies)}.")
     actions.append("Prepare rollback if error budget burn remains elevated for 10 minutes.")
 
-    return {
-        "owner": owner,
-        "escalation_channel": f"#inc-{payload.service}",
-        "eta_minutes": eta_by_severity[payload.severity],
-        "actions": actions,
-    }
+    return ToolOutput.json(
+        {
+            "owner": owner,
+            "escalation_channel": f"#inc-{payload.service}",
+            "eta_minutes": eta_by_severity[payload.severity],
+            "actions": actions,
+        }
+    )
 
 
 class DraftUpdateInput(BaseModel):
@@ -216,7 +223,7 @@ class DraftUpdateInput(BaseModel):
     actions: list[str] = Field(min_length=1)
 
 
-def draft_external_update(payload: DraftUpdateInput) -> str:
+def draft_external_update(payload: DraftUpdateInput) -> ToolOutput:
     """Render a compact external status-page update as JSON."""
     message = {
         "incident": f"{payload.service} disruption",
@@ -228,7 +235,7 @@ def draft_external_update(payload: DraftUpdateInput) -> str:
         "next_update_in_minutes": payload.eta_minutes,
         "current_actions": payload.actions,
     }
-    return json.dumps(message, ensure_ascii=True, sort_keys=True)
+    return ToolOutput.text(json.dumps(message, ensure_ascii=True, sort_keys=True))
 
 
 async def main() -> None:

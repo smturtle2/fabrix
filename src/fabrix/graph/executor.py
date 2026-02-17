@@ -123,7 +123,11 @@ class GraphExecutor:
                             "tool_name": call.name,
                             "call_id": call_id,
                             "ok": result.ok,
-                            "output": result.output,
+                            "output": (
+                                result.output.model_dump(mode="json")
+                                if result.output is not None
+                                else None
+                            ),
                             "error": result.error,
                         }
                     )

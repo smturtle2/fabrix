@@ -6,21 +6,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from .output import ToolOutput
 from .registry import ToolSpec
 
 
 class ToolExecutionResult(BaseModel):
     ok: bool
-    output: Any | None = None
+    output: ToolOutput | None = None
     error: str | None = None
     latency_ms: float
-
-
-def _normalize_output(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    return value
-
 
 async def execute_tool(spec: ToolSpec, arguments: dict[str, Any]) -> ToolExecutionResult:
     start = time.perf_counter()
@@ -45,9 +39,15 @@ async def execute_tool(spec: ToolSpec, arguments: dict[str, Any]) -> ToolExecuti
         value = spec.func(payload)
         if inspect.isawaitable(value):
             value = await value
+        if not isinstance(value, ToolOutput):
+            return ToolExecutionResult(
+                ok=False,
+                error=f"tool `{spec.name}` must return ToolOutput",
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
         return ToolExecutionResult(
             ok=True,
-            output=_normalize_output(value),
+            output=value,
             latency_ms=(time.perf_counter() - start) * 1000,
         )
     except Exception as exc:

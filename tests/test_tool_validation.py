@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
+from fabrix.tools import ToolOutput
 from fabrix.tools.registry import ToolRegistry
 from fabrix.tools.runtime import execute_tool
 
@@ -12,11 +13,15 @@ class AddInput(BaseModel):
     b: int
 
 
-def add(payload: AddInput) -> int:
-    return payload.a + payload.b
+def add(payload: AddInput) -> ToolOutput:
+    return ToolOutput.json({"sum": payload.a + payload.b})
 
 
-def add_async(payload: AddInput) -> int:
+async def add_async(payload: AddInput) -> ToolOutput:
+    return ToolOutput.text(str(payload.a + payload.b))
+
+
+def add_legacy(payload: AddInput) -> int:
     return payload.a + payload.b
 
 
@@ -51,7 +56,10 @@ async def test_single_pydantic_parameter_is_validated() -> None:
 
     ok = await execute_tool(spec, {"a": 2, "b": 5})
     assert ok.ok is True
-    assert ok.output == 7
+    assert ok.output is not None
+    assert ok.output.model_dump(mode="json") == {
+        "parts": [{"type": "json", "data": {"sum": 7}}]
+    }
 
     bad = await execute_tool(spec, {"a": "bad", "b": 5})
     assert bad.ok is False
@@ -86,6 +94,16 @@ async def test_tool_rejects_non_object_arguments() -> None:
     bad = await execute_tool(spec, "bad")  # type: ignore[arg-type]
     assert bad.ok is False
     assert bad.error == "tool arguments must be a JSON object"
+
+
+@pytest.mark.asyncio
+async def test_tool_rejects_legacy_return_types() -> None:
+    spec = ToolRegistry.from_callables([add_legacy]).get("add_legacy")
+    assert spec is not None
+
+    bad = await execute_tool(spec, {"a": 2, "b": 5})
+    assert bad.ok is False
+    assert bad.error == "tool `add_legacy` must return ToolOutput"
 
 
 def test_registry_rejects_multi_parameter_tools() -> None:

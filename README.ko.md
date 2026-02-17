@@ -38,6 +38,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import TextMessage
+from fabrix.tools import ToolOutput
 
 
 class AddInput(BaseModel):
@@ -45,8 +46,8 @@ class AddInput(BaseModel):
     b: int
 
 
-def add_numbers(payload: AddInput) -> int:
-    return payload.a + payload.b
+def add_numbers(payload: AddInput) -> ToolOutput:
+    return ToolOutput.json({"sum": payload.a + payload.b})
 
 
 async def main() -> None:
@@ -114,11 +115,12 @@ async for event in agent.run_stream(messages=messages):
 Fabrix는 아래 형태의 도구를 허용합니다.
 
 ```python
-def tool(payload: BaseModel) -> Any: ...
+def tool(payload: BaseModel) -> ToolOutput: ...
 ```
 
 - 도구는 파라미터를 정확히 1개만 받아야 합니다.
 - 파라미터 타입은 Pydantic `BaseModel`이어야 합니다.
+- 반환 타입은 `ToolOutput`이어야 합니다 (`v1.2.0` 브레이킹 변경).
 - 런타임 인자는 payload 필드와 일치하는 JSON object여야 합니다.
 - 추가 인자 키는 허용되지 않습니다.
 - sync/async 도구를 모두 지원합니다.
@@ -147,6 +149,11 @@ def tool(payload: BaseModel) -> Any: ...
 - `task` 텍스트 -> `TextMessage(text="...")`
 - `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
 - `context` -> 직렬화해서 `TextMessage.text`에 포함
+
+도구 반환값 마이그레이션:
+
+- 이전: tool이 `str` / `dict` / scalar / 임의 JSON-like 객체를 반환
+- 현재: tool은 반드시 `ToolOutput`을 반환 (`ToolOutput.text(...)`, `ToolOutput.json(...)`, `ToolOutput.image(...)`)
 
 ## 문서
 

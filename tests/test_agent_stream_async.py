@@ -21,6 +21,7 @@ from fabrix.graph.state import (
 )
 from fabrix.llm.oauth_codex import OAuthCodexStateProvider
 from fabrix.messages import ImageMessage, TextMessage
+from fabrix.tools import ToolOutput
 
 
 class AddInput(BaseModel):
@@ -28,16 +29,16 @@ class AddInput(BaseModel):
     b: int
 
 
-def add_numbers(payload: AddInput) -> int:
-    return payload.a + payload.b
+def add_numbers(payload: AddInput) -> ToolOutput:
+    return ToolOutput.json({"sum": payload.a + payload.b})
 
 
 class DoubleInput(BaseModel):
     value: int
 
 
-async def slow_double(payload: DoubleInput) -> int:
-    return payload.value * 2
+async def slow_double(payload: DoubleInput) -> ToolOutput:
+    return ToolOutput.json({"value": payload.value * 2})
 
 
 def _text_message(text: str) -> TextMessage:
@@ -219,6 +220,7 @@ async def test_stream_emits_events_in_expected_order(monkeypatch: pytest.MonkeyP
     assert [event.phase for event in tool_events] == ["start", "finish"]
     assert tool_events[-1].result is not None
     assert tool_events[-1].result.ok is True
+    assert isinstance(tool_events[-1].result.output, ToolOutput)
     assert isinstance(events[-1], TaskFinishedEvent)
     assert events[-1].final_output == "7"
 

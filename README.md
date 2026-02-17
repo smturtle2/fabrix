@@ -38,6 +38,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import TextMessage
+from fabrix.tools import ToolOutput
 
 
 class AddInput(BaseModel):
@@ -45,8 +46,8 @@ class AddInput(BaseModel):
     b: int
 
 
-def add_numbers(payload: AddInput) -> int:
-    return payload.a + payload.b
+def add_numbers(payload: AddInput) -> ToolOutput:
+    return ToolOutput.json({"sum": payload.a + payload.b})
 
 
 async def main() -> None:
@@ -114,11 +115,12 @@ async for event in agent.run_stream(messages=messages):
 Fabrix accepts tools in this shape:
 
 ```python
-def tool(payload: BaseModel) -> Any: ...
+def tool(payload: BaseModel) -> ToolOutput: ...
 ```
 
 - The tool must accept exactly one parameter.
 - The parameter type must be a Pydantic `BaseModel`.
+- The return type must be `ToolOutput` (breaking in v1.2.0).
 - Runtime arguments must be a JSON object matching payload fields.
 - Extra argument keys are rejected.
 - Both sync and async tools are supported.
@@ -147,6 +149,11 @@ Mapping:
 - `task` text -> `TextMessage(text="...")`
 - `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
 - `context` -> include serialized context in `TextMessage.text`
+
+Tool migration:
+
+- Before: tool returns `str` / `dict` / scalar / arbitrary JSON-like objects
+- After: tool must return `ToolOutput` (for example `ToolOutput.text(...)`, `ToolOutput.json(...)`, `ToolOutput.image(...)`)
 
 ## Documentation
 

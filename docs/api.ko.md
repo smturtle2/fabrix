@@ -28,6 +28,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import ImageMessage, TextMessage
+from fabrix.tools import ToolImagePart, ToolJSONPart, ToolOutput, ToolTextPart
 ```
 
 ## Agent 생성
@@ -108,15 +109,22 @@ async for event in agent.run_stream(messages=messages):
 허용되는 tool 형태:
 
 ```python
-def tool(payload: BaseModel) -> Any: ...
+def tool(payload: BaseModel) -> ToolOutput: ...
 ```
 
 런타임 규칙:
 
 - 파라미터는 정확히 1개
 - 파라미터 타입은 Pydantic `BaseModel`
+- 반환 타입은 반드시 `ToolOutput`
 - 인자는 payload 필드와 일치하는 JSON object
 - 추가 키는 거부
+
+`ToolOutput`은 멀티모달 part를 지원합니다.
+
+- `ToolTextPart(type="text", text="...")`
+- `ToolImagePart(type="image", image_url="...", caption=None)`
+- `ToolJSONPart(type="json", data={...})`
 
 ## 이벤트 레퍼런스
 
@@ -147,6 +155,7 @@ def tool(payload: BaseModel) -> Any: ...
 - `max_steps_reached`
 
 tool 실패는 non-terminal이며 `ToolEvent(phase="finish")`의 `result.ok == False`로 전달됩니다.
+성공한 경우 `result.output`은 `ToolOutput` 타입으로 제공됩니다.
 
 ## 마이그레이션 (브레이킹)
 
@@ -163,6 +172,11 @@ tool 실패는 non-terminal이며 `ToolEvent(phase="finish")`의 `result.ok == F
 - `task` -> `TextMessage(text="...")`
 - `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
 - `context` -> 직렬화해서 `TextMessage.text`에 포함
+
+tool 반환값 매핑:
+
+- 이전: scalar/string/dict-like 값을 직접 반환
+- 현재: `ToolOutput.text(...)`, `ToolOutput.json(...)`, `ToolOutput.image(...)` 형태로 반환
 
 ## 트러블슈팅
 

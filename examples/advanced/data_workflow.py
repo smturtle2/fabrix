@@ -15,6 +15,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import TextMessage
+from fabrix.tools import ToolOutput
 
 RAW_DATA = [
     {"category": "A", "value": 12.4},
@@ -35,21 +36,21 @@ class CleanRecordsInput(BaseModel):
     rows: list[DataRow] = Field(min_length=1)
 
 
-def clean_records(payload: CleanRecordsInput) -> list[dict[str, float | str]]:
+def clean_records(payload: CleanRecordsInput) -> ToolOutput:
     """Drop invalid records and normalize value precision."""
     cleaned: list[dict[str, float | str]] = []
     for row in payload.rows:
         if row.value < 0:
             continue
         cleaned.append({"category": row.category, "value": round(float(row.value), 2)})
-    return cleaned
+    return ToolOutput.json(cleaned)
 
 
 class AggregateInput(BaseModel):
     rows: list[DataRow] = Field(min_length=1)
 
 
-def aggregate_by_category(payload: AggregateInput) -> list[dict[str, float | int | str]]:
+def aggregate_by_category(payload: AggregateInput) -> ToolOutput:
     """Compute count and average per category as list rows."""
     buckets: dict[str, list[float]] = {}
     for row in payload.rows:
@@ -58,7 +59,7 @@ def aggregate_by_category(payload: AggregateInput) -> list[dict[str, float | int
     summary_rows: list[dict[str, float | int | str]] = []
     for category, values in sorted(buckets.items()):
         summary_rows.append({"category": category, "count": len(values), "avg": round(mean(values), 2)})
-    return summary_rows
+    return ToolOutput.json(summary_rows)
 
 
 class SummaryRow(BaseModel):
@@ -71,10 +72,10 @@ class RenderInput(BaseModel):
     summary_rows: list[SummaryRow] = Field(min_length=1)
 
 
-def render_report(payload: RenderInput) -> str:
+def render_report(payload: RenderInput) -> ToolOutput:
     """Render category summary rows into a compact, deterministic JSON report."""
     report_rows = [row.model_dump(mode="json") for row in payload.summary_rows]
-    return json.dumps(report_rows, ensure_ascii=True, sort_keys=True)
+    return ToolOutput.text(json.dumps(report_rows, ensure_ascii=True, sort_keys=True))
 
 
 async def main() -> None:

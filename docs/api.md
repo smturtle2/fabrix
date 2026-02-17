@@ -28,6 +28,7 @@ from fabrix.events import (
     ToolEvent,
 )
 from fabrix.messages import ImageMessage, TextMessage
+from fabrix.tools import ToolImagePart, ToolJSONPart, ToolOutput, ToolTextPart
 ```
 
 ## Agent Construction
@@ -108,15 +109,22 @@ async for event in agent.run_stream(messages=messages):
 Accepted tool shape:
 
 ```python
-def tool(payload: BaseModel) -> Any: ...
+def tool(payload: BaseModel) -> ToolOutput: ...
 ```
 
 Runtime rules:
 
 - Exactly one parameter
 - Parameter type must be Pydantic `BaseModel`
+- Return type must be `ToolOutput`
 - Tool arguments must be JSON objects with matching field names
 - Extra keys are rejected
+
+`ToolOutput` supports structured multimodal parts:
+
+- `ToolTextPart(type="text", text="...")`
+- `ToolImagePart(type="image", image_url="...", caption=None)`
+- `ToolJSONPart(type="json", data={...})`
 
 ## Event Reference
 
@@ -147,6 +155,7 @@ Current error codes include:
 - `max_steps_reached`
 
 Tool failures are non-terminal and reported in `ToolEvent(phase="finish")` with `result.ok == False`.
+Successful tool results expose typed payloads in `result.output: ToolOutput`.
 
 ## Migration (Breaking)
 
@@ -163,6 +172,11 @@ Input mapping:
 - `task` -> `TextMessage(text="...")`
 - `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
 - `context` -> include serialized context text in `TextMessage.text`
+
+Tool return mapping:
+
+- Before: tool returned scalar/string/dict-like outputs
+- After: tool must return `ToolOutput` via `ToolOutput.text(...)`, `ToolOutput.json(...)`, or `ToolOutput.image(...)`
 
 ## Troubleshooting
 

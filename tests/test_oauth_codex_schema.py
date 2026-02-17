@@ -227,6 +227,104 @@ async def test_provider_passes_messages_to_client_in_order(fake_client: Any) -> 
 
 
 @pytest.mark.asyncio
+async def test_provider_appends_multimodal_history_image_parts(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[
+            {
+                "kind": "tool_result",
+                "step": 2,
+                "tool_name": "vision_tool",
+                "call_id": "c2",
+                "ok": True,
+                "output": {
+                    "parts": [
+                        {
+                            "type": "image",
+                            "image_url": "https://example.com/tool.png",
+                            "caption": "detected object",
+                        }
+                    ]
+                },
+            }
+        ],
+        current_state=NextState.reasoning,
+        step=3,
+        tool_schemas=[],
+    )
+
+    sent_messages = fake_client.calls[-1]["messages"]
+    content = sent_messages[-1]["content"]
+    assert isinstance(content, list)
+    assert [part["type"] for part in content] == ["input_text", "input_text", "input_image"]
+    assert content[-1]["image_url"] == "https://example.com/tool.png"
+
+
+@pytest.mark.asyncio
+async def test_provider_appends_multimodal_history_text_and_json_parts(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[
+            {
+                "kind": "tool_result",
+                "step": 4,
+                "tool_name": "formatter",
+                "call_id": "c4",
+                "ok": True,
+                "output": {
+                    "parts": [
+                        {"type": "text", "text": "formatted"},
+                        {"type": "json", "data": {"a": 1}},
+                    ]
+                },
+            }
+        ],
+        current_state=NextState.reasoning,
+        step=5,
+        tool_schemas=[],
+    )
+
+    sent_messages = fake_client.calls[-1]["messages"]
+    content = sent_messages[-1]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "input_text"
+    assert "tool_result step=4" in content[0]["text"]
+    assert any(part["type"] == "input_text" and part["text"] == "formatted" for part in content)
+    assert any(part["type"] == "input_text" and part["text"] == '{"a": 1}' for part in content)
+
+
+@pytest.mark.asyncio
+async def test_provider_appends_failed_tool_history_as_single_text(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[
+            {
+                "kind": "tool_result",
+                "step": 6,
+                "tool_name": "broken",
+                "call_id": "c6",
+                "ok": False,
+                "error": "boom",
+            }
+        ],
+        current_state=NextState.reasoning,
+        step=7,
+        tool_schemas=[],
+    )
+
+    sent_messages = fake_client.calls[-1]["messages"]
+    content = sent_messages[-1]["content"]
+    assert isinstance(content, list)
+    assert len(content) == 1
+    assert content[0]["type"] == "input_text"
+    assert "ok=False" in content[0]["text"]
+    assert "error=boom" in content[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_provider_rejects_non_message_objects(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
 

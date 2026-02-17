@@ -5,7 +5,7 @@ API Guides: [English](docs/api.md) | [한국어](docs/api.ko.md)
 
 ## Overview
 
-Fabrix is a graph-based agent framework built on top of `oauth-codex>=2.2.0`.
+Fabrix is a graph-based agent framework built on top of `oauth-codex>=2.3.0`.
 It provides a structured execution graph with streaming events for tool-driven workflows.
 
 ## Key Features
@@ -14,6 +14,7 @@ It provides a structured execution graph with streaming events for tool-driven w
 - Structured state outputs powered by Pydantic models
 - Sequential tool execution with strict payload validation
 - Async streaming event API for step-by-step observability
+- Multimodal input with explicit message models: `TextMessage`, `ImageMessage`
 
 ## Installation
 
@@ -36,6 +37,7 @@ from fabrix.events import (
     TaskFinishedEvent,
     ToolEvent,
 )
+from fabrix.messages import TextMessage
 
 
 class AddInput(BaseModel):
@@ -54,7 +56,8 @@ async def main() -> None:
         tools=[add_numbers],
     )
 
-    async for event in agent.run_task_stream("Use add_numbers to compute 3 + 9"):
+    messages = [TextMessage(text="Use add_numbers to compute 3 + 9")]
+    async for event in agent.run_stream(messages=messages):
         print(f"[step={event.step}] {event.event_type}")
 
         if isinstance(event, ReasoningEvent):
@@ -77,21 +80,32 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## Image Input
+## Message Models
 
-`run_task_stream(...)` accepts multimodal inputs:
+Fabrix input is now `list[TextMessage | ImageMessage]`.
 
-- `task`: `str | None`
-- `images`: `str | Path | bytes | list[...]`
-- At least one of `task` or `images` is required.
+- `TextMessage(role: str = "user", text: str)`
+- `ImageMessage(role: str = "user", image: str | Path | bytes, text: str | None = None)`
+- Unknown message fields are rejected at construction time.
 
-Image-only example:
+`ImageMessage.image` accepts:
+
+- remote URL (`https://...`)
+- local path (`Path` or string path)
+- raw bytes (`bytes`), encoded to a data URL internally
+
+## Multimodal Input
 
 ```python
-async for event in agent.run_task_stream(
-    task=None,
-    images=["https://example.com/screenshot.png"],
-):
+from fabrix.messages import ImageMessage, TextMessage
+
+messages = [
+    TextMessage(text="Describe this screenshot"),
+    ImageMessage(image="https://example.com/screenshot.png"),
+    TextMessage(text="Focus on errors"),
+]
+
+async for event in agent.run_stream(messages=messages):
     ...
 ```
 
@@ -111,7 +125,7 @@ def tool(payload: BaseModel) -> Any: ...
 
 ## Event Stream
 
-`run_task_stream(...)` yields these event types:
+`run_stream(...)` yields these event types:
 
 - `reasoning`
 - `tool` (`phase="start"` / `phase="finish"`)
@@ -121,12 +135,18 @@ def tool(payload: BaseModel) -> Any: ...
 
 `reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
 
-Typical flow:
+## Migration (Breaking)
 
-1. `reasoning`
-2. zero or more `tool` start/finish pairs
-3. optional `response`
-4. `task_finished` or `task_failed`
+`run_task_stream(task, images, context)` has been removed.
+
+- Before: `agent.run_task_stream(task=..., images=..., context=...)`
+- After: `agent.run_stream(messages=[...])`
+
+Mapping:
+
+- `task` text -> `TextMessage(text="...")`
+- `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
+- `context` -> include serialized context in `TextMessage.text`
 
 ## Documentation
 
@@ -137,6 +157,7 @@ Typical flow:
 ## Examples
 
 - Minimal quickstart: [`examples/minimal/quickstart.py`](examples/minimal/quickstart.py)
+- Multimodal vision: [`examples/minimal/multimodal.py`](examples/minimal/multimodal.py)
 - Data workflow: [`examples/advanced/data_workflow.py`](examples/advanced/data_workflow.py)
 - Incident response workflow: [`examples/advanced/incident_response.py`](examples/advanced/incident_response.py)
 

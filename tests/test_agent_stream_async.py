@@ -20,6 +20,7 @@ from fabrix.graph.state import (
     ToolCallState,
 )
 from fabrix.llm.oauth_codex import OAuthCodexStateProvider
+from fabrix.messages import ImageMessage, TextMessage
 
 
 class AddInput(BaseModel):
@@ -37,6 +38,10 @@ class DoubleInput(BaseModel):
 
 async def slow_double(payload: DoubleInput) -> int:
     return payload.value * 2
+
+
+def _text_message(text: str) -> TextMessage:
+    return TextMessage(role="user", text=text)
 
 
 def _patch_provider_states(monkeypatch: pytest.MonkeyPatch, states: list[object]) -> None:
@@ -72,15 +77,28 @@ def test_agent_rejects_removed_init_parameters() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_rejects_when_task_and_images_missing() -> None:
+async def test_stream_rejects_when_messages_missing() -> None:
     agent = Agent(
         instructions="Follow the graph.",
         model="gpt-5.3-codex",
         tools=[add_numbers],
     )
 
-    with pytest.raises(ValueError, match="Either task or images must be provided"):
-        async for _event in agent.run_task_stream():
+    with pytest.raises(ValueError, match="messages must be a non-empty list of TextMessage/ImageMessage objects"):
+        async for _event in agent.run_stream(messages=[]):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_dict_messages() -> None:
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    with pytest.raises(TypeError, match="messages must be a list of TextMessage/ImageMessage objects"):
+        async for _event in agent.run_stream(messages=[{"role": "user", "content": "x"}]):  # type: ignore[list-item]
             pass
 
 
@@ -108,16 +126,17 @@ async def test_stream_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch) 
         tools=[add_numbers],
     )
 
-    events = [
-        event
-        async for event in agent.run_task_stream(task=None, images=[b"\x89PNG\r\n\x1a\n\x00"])
+    messages = [
+        ImageMessage(role="user", image="https://example.com/input.png")
     ]
+    events = [event async for event in agent.run_stream(messages=messages)]
+
     assert isinstance(events[-1], TaskFinishedEvent)
     assert events[-1].final_output == "image analyzed"
 
 
 @pytest.mark.asyncio
-async def test_stream_forwards_images_to_state_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stream_forwards_messages_to_state_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
     async def fake_generate_state(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -146,13 +165,12 @@ async def test_stream_forwards_images_to_state_provider(monkeypatch: pytest.Monk
         tools=[add_numbers],
     )
 
-    images = ["https://example.com/input.png"]
-    events = [event async for event in agent.run_task_stream(task=None, images=images)]
+    messages = [_text_message("hello")]
+    events = [event async for event in agent.run_stream(messages=messages)]
 
     assert isinstance(events[-1], TaskFinishedEvent)
     assert calls
-    assert calls[0]["task"] is None
-    assert calls[0]["images"] == images
+    assert calls[0]["messages"] == messages
 
 
 @pytest.mark.asyncio
@@ -193,7 +211,7 @@ async def test_stream_emits_events_in_expected_order(monkeypatch: pytest.MonkeyP
         tools=[add_numbers],
     )
 
-    events = [event async for event in agent.run_task_stream("add 2 and 5")]
+    events = [event async for event in agent.run_stream(messages=[_text_message("add 2 and 5")])]
 
     assert any(isinstance(event, ReasoningEvent) for event in events)
     assert any(isinstance(event, ResponseEvent) for event in events)
@@ -241,7 +259,7 @@ async def test_stream_executes_multiple_tools_sequentially(monkeypatch: pytest.M
         tools=[slow_double],
     )
 
-    events = [event async for event in agent.run_task_stream("run tools")]
+    events = [event async for event in agent.run_stream(messages=[_text_message("run tools")])]
 
     tool_events = [event for event in events if isinstance(event, ToolEvent)]
     assert [event.phase for event in tool_events] == ["start", "finish", "start", "finish"]
@@ -274,7 +292,7 @@ async def test_invalid_transition_fails_fast(monkeypatch: pytest.MonkeyPatch) ->
         tools=[add_numbers],
     )
 
-    events = [event async for event in agent.run_task_stream("invalid transition")]
+    events = [event async for event in agent.run_stream(messages=[_text_message("invalid transition")])]
     assert isinstance(events[-1], TaskFailedEvent)
     assert events[-1].error_code == "invalid_transition"
 
@@ -312,7 +330,7 @@ async def test_tool_errors_are_emitted(monkeypatch: pytest.MonkeyPatch) -> None:
         tools=[add_numbers],
     )
 
-    events = [event async for event in agent.run_task_stream("tool errors")]
+    events = [event async for event in agent.run_stream(messages=[_text_message("tool errors")])]
     finished_tools = [
         event for event in events if isinstance(event, ToolEvent) and event.phase == "finish"
     ]
@@ -332,7 +350,7 @@ async def test_max_steps_without_response_emits_failure(monkeypatch: pytest.Monk
         tools=[add_numbers],
     )
 
-    events = [event async for event in agent.run_task_stream("loop")]
+    events = [event async for event in agent.run_stream(messages=[_text_message("loop")])]
     assert isinstance(events[-1], TaskFailedEvent)
     assert events[-1].step == _DEFAULT_MAX_STEPS
     assert events[-1].error_code == "max_steps_reached"
@@ -370,7 +388,7 @@ async def test_max_steps_uses_last_response_when_available(monkeypatch: pytest.M
         tools=[add_numbers],
     )
 
-    events = [event async for event in agent.run_task_stream("loop")]
+    events = [event async for event in agent.run_stream(messages=[_text_message("loop")])]
     assert isinstance(events[-1], TaskFinishedEvent)
     assert events[-1].step == _DEFAULT_MAX_STEPS
     assert events[-1].completion_reason == "max_steps_reached"

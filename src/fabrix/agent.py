@@ -6,8 +6,8 @@ from typing import Any
 from fabrix.events.models import AgentEvent
 from fabrix.graph.executor import GraphExecutor
 from fabrix.llm.oauth_codex import DEFAULT_MODEL, OAuthCodexStateProvider
+from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools.registry import ToolRegistry
-from fabrix.types import ImageInput
 
 _DEFAULT_MAX_STEPS = 128
 
@@ -34,15 +34,15 @@ class Agent:
             max_steps=_DEFAULT_MAX_STEPS,
         )
 
-    async def run_task_stream(
+    async def run_stream(
         self,
-        task: str | None = None,
         *,
-        images: ImageInput | list[ImageInput] | None = None,
-        context: dict[str, Any] | None = None,
+        messages: list[TextMessage | ImageMessage],
     ) -> AsyncIterator[AgentEvent]:
-        if task is None and images is None:
-            raise ValueError("Either task or images must be provided")
+        if not messages:
+            raise ValueError("messages must be a non-empty list of TextMessage/ImageMessage objects")
+        if any(not isinstance(message, (TextMessage, ImageMessage)) for message in messages):
+            raise TypeError("messages must be a list of TextMessage/ImageMessage objects")
 
-        async for event in self._executor.run_stream(task=task, images=images, context=context):
+        async for event in self._executor.run_stream(messages=messages):
             yield event

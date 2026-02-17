@@ -5,7 +5,7 @@ API Guides: [English](docs/api.md) | [한국어](docs/api.ko.md)
 
 ## 개요
 
-Fabrix는 `oauth-codex>=2.2.0` 위에서 동작하는 그래프 기반 에이전트 프레임워크입니다.
+Fabrix는 `oauth-codex>=2.3.0` 위에서 동작하는 그래프 기반 에이전트 프레임워크입니다.
 도구 중심 워크플로를 위해 구조화된 실행 그래프와 스트리밍 이벤트를 제공합니다.
 
 ## 핵심 기능
@@ -14,6 +14,7 @@ Fabrix는 `oauth-codex>=2.2.0` 위에서 동작하는 그래프 기반 에이전
 - Pydantic 모델 기반의 구조화된 상태 출력
 - 엄격한 페이로드 검증을 포함한 순차적 도구 실행
 - 단계별 관측이 가능한 async 스트리밍 이벤트 API
+- 명시적 메시지 모델 기반 멀티모달 입력: `TextMessage`, `ImageMessage`
 
 ## 설치
 
@@ -36,6 +37,7 @@ from fabrix.events import (
     TaskFinishedEvent,
     ToolEvent,
 )
+from fabrix.messages import TextMessage
 
 
 class AddInput(BaseModel):
@@ -54,7 +56,8 @@ async def main() -> None:
         tools=[add_numbers],
     )
 
-    async for event in agent.run_task_stream("Use add_numbers to compute 3 + 9"):
+    messages = [TextMessage(text="Use add_numbers to compute 3 + 9")]
+    async for event in agent.run_stream(messages=messages):
         print(f"[step={event.step}] {event.event_type}")
 
         if isinstance(event, ReasoningEvent):
@@ -77,21 +80,32 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## 이미지 입력
+## 메시지 모델
 
-`run_task_stream(...)`은 멀티모달 입력을 지원합니다.
+Fabrix 입력은 이제 `list[TextMessage | ImageMessage]`입니다.
 
-- `task`: `str | None`
-- `images`: `str | Path | bytes | list[...]`
-- `task` 또는 `images` 중 최소 하나가 필요합니다.
+- `TextMessage(role: str = "user", text: str)`
+- `ImageMessage(role: str = "user", image: str | Path | bytes, text: str | None = None)`
+- 메시지 모델 생성 시 정의되지 않은 필드는 거부됩니다.
 
-이미지 단독 예시:
+`ImageMessage.image`는 다음을 지원합니다.
+
+- 원격 URL (`https://...`)
+- 로컬 경로 (`Path` 또는 문자열 경로)
+- raw bytes (`bytes`) 입력 (내부에서 data URL로 인코딩)
+
+## 멀티모달 입력
 
 ```python
-async for event in agent.run_task_stream(
-    task=None,
-    images=["https://example.com/screenshot.png"],
-):
+from fabrix.messages import ImageMessage, TextMessage
+
+messages = [
+    TextMessage(text="이 스크린샷을 설명해줘"),
+    ImageMessage(image="https://example.com/screenshot.png"),
+    TextMessage(text="오류 위주로 봐줘"),
+]
+
+async for event in agent.run_stream(messages=messages):
     ...
 ```
 
@@ -111,7 +125,7 @@ def tool(payload: BaseModel) -> Any: ...
 
 ## 이벤트 스트림
 
-`run_task_stream(...)`은 다음 이벤트 타입을 생성합니다.
+`run_stream(...)`은 다음 이벤트 타입을 생성합니다.
 
 - `reasoning`
 - `tool` (`phase="start"` / `phase="finish"`)
@@ -121,12 +135,18 @@ def tool(payload: BaseModel) -> Any: ...
 
 `reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace / plan summary입니다.
 
-일반적인 흐름:
+## 마이그레이션 (브레이킹)
 
-1. `reasoning`
-2. 0개 이상의 `tool` start/finish 쌍
-3. 선택적 `response`
-4. `task_finished` 또는 `task_failed`
+`run_task_stream(task, images, context)`는 제거되었습니다.
+
+- 이전: `agent.run_task_stream(task=..., images=..., context=...)`
+- 현재: `agent.run_stream(messages=[...])`
+
+매핑:
+
+- `task` 텍스트 -> `TextMessage(text="...")`
+- `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
+- `context` -> 직렬화해서 `TextMessage.text`에 포함
 
 ## 문서
 
@@ -137,6 +157,7 @@ def tool(payload: BaseModel) -> Any: ...
 ## 예제
 
 - Minimal quickstart: [`examples/minimal/quickstart.py`](examples/minimal/quickstart.py)
+- 멀티모달 비전: [`examples/minimal/multimodal.py`](examples/minimal/multimodal.py)
 - Data workflow: [`examples/advanced/data_workflow.py`](examples/advanced/data_workflow.py)
 - Incident response workflow: [`examples/advanced/incident_response.py`](examples/advanced/incident_response.py)
 

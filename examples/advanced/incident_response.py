@@ -13,6 +13,7 @@ from fabrix.events import (
     TaskFinishedEvent,
     ToolEvent,
 )
+from fabrix.messages import TextMessage
 
 RAW_ALERTS = [
     {
@@ -234,7 +235,7 @@ async def main() -> None:
     agent = Agent(
         instructions=(
             "You are an incident commander. Execute this sequence exactly once: "
-            "1) summarize_alerts with context.alerts, "
+            "1) summarize_alerts with alerts from user message, "
             "2) choose_primary_incident with ranked_services from step 1, "
             "3) fetch_service_dependencies with service from step 2, "
             "4) build_mitigation_plan with service, severity, users_affected from step 2 plus "
@@ -254,10 +255,19 @@ async def main() -> None:
         ],
     )
 
-    task = "Triages context.alerts, run the incident response workflow, and publish external update."
-    context = {"alerts": RAW_ALERTS}
+    alerts_json = json.dumps(RAW_ALERTS, ensure_ascii=True)
+    messages = [
+        TextMessage(
+            role="user",
+            text=(
+                "Triage the following alerts, run the incident response workflow, "
+                "and publish an external update. "
+                f"alerts={alerts_json}"
+            ),
+        )
+    ]
 
-    async for event in agent.run_task_stream(task, context=context):
+    async for event in agent.run_stream(messages=messages):
         if isinstance(event, ReasoningEvent):
             print(f"[step={event.step}] reasoning={event.reasoning}")
             print(f"[step={event.step}] focus={event.focus} next={event.next_state}")

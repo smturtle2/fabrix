@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import base64
 import copy
 import json
 from datetime import date, datetime, time
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from oauth_codex import OAuthCodexClient
@@ -22,7 +20,8 @@ from fabrix.graph.state import (
     ToolCallState,
 )
 from fabrix.graph.transitions import allowed_next_states
-from fabrix.types import ImageInput, ReasoningEffort
+from fabrix.messages import ImageMessage, TextMessage, to_oauth_message
+from fabrix.types import ReasoningEffort
 
 DEFAULT_MODEL = "gpt-5.3-codex"
 
@@ -75,19 +74,14 @@ class OAuthCodexStateProvider:
     async def generate_state(
         self,
         *,
-        task: str | None,
-        images: ImageInput | list[ImageInput] | None,
-        context: dict[str, Any],
+        messages: list[TextMessage | ImageMessage],
         history: list[dict[str, Any]],
         current_state: NextState,
         step: int,
         tool_schemas: list[dict[str, Any]],
     ) -> StateEnvelope:
-        normalized_images = self._normalize_images(images)
         prompt = self._build_prompt(
-            task=task,
-            images=normalized_images,
-            context=context,
+            messages=messages,
             history=history,
             current_state=current_state,
             step=step,
@@ -100,8 +94,7 @@ class OAuthCodexStateProvider:
 
         try:
             payload = await self._client.agenerate(
-                prompt=prompt,
-                images=normalized_images,
+                messages=self._build_model_messages(prompt=prompt, messages=messages),
                 model=self._model,
                 reasoning_effort=self._reasoning_effort,
                 output_schema=output_schema,
@@ -261,9 +254,7 @@ class OAuthCodexStateProvider:
     def _build_prompt(
         self,
         *,
-        task: str | None,
-        images: list[str | Path],
-        context: dict[str, Any],
+        messages: list[TextMessage | ImageMessage],
         history: list[dict[str, Any]],
         current_state: NextState,
         step: int,
@@ -278,7 +269,6 @@ class OAuthCodexStateProvider:
             if not tool_schemas
             else ""
         )
-        task_line = task if task is not None else "[not provided]"
 
         return (
             "You are Fabrix, a graph-based agent state generator.\n"
@@ -301,15 +291,13 @@ class OAuthCodexStateProvider:
             "- If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps.\n"
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
             "- With a finite step budget, avoid long reasoning-only loops and transition to tool_call/response/finish as confidence grows.\n"
-            "- If Task is [not provided], infer user intent from images and context before choosing next_state.\n"
+            "- Infer user intent from input messages before choosing next_state.\n"
             "\n"
             "Developer instructions:\n"
             f"{self._instructions}\n"
             "\n"
             f"Step: {step}\n"
-            f"Task: {task_line}\n"
-            f"Images count: {len(images)}\n"
-            f"Context JSON: {self._json_dumps(context)}\n"
+            f"Input messages JSON: {self._json_dumps(self._serialize_messages(messages))}\n"
             f"Available tools JSON schema: {self._json_dumps(tool_schemas)}\n"
             f"Execution history JSON: {self._json_dumps(history)}\n"
         )
@@ -332,51 +320,21 @@ class OAuthCodexStateProvider:
             return sorted(value, key=str)
         return str(value)
 
-    def _normalize_images(
+    def _build_model_messages(
         self,
-        images: ImageInput | list[ImageInput] | None,
-    ) -> list[str | Path]:
-        if images is None:
-            return []
+        *,
+        prompt: str,
+        messages: list[TextMessage | ImageMessage],
+    ) -> list[dict[str, Any]]:
+        return [{"role": "system", "content": prompt}, *self._serialize_messages(messages)]
 
-        raw_items: list[ImageInput]
-        if isinstance(images, (str, Path, bytes)):
-            raw_items = [images]
-        elif isinstance(images, list):
-            raw_items = images
-        else:
-            raise TypeError("images must be str/Path/bytes or list of str/Path/bytes")
-
-        normalized: list[str | Path] = []
-        for item in raw_items:
-            if isinstance(item, (str, Path)):
-                normalized.append(item)
-                continue
-            if isinstance(item, bytes):
-                normalized.append(self._image_bytes_to_data_url(item))
-                continue
-            raise TypeError(
-                f"images items must be str/Path/bytes, got {type(item).__name__}"
-            )
-
-        return normalized
-
-    def _image_bytes_to_data_url(self, raw: bytes) -> str:
-        mime_type = self._detect_image_mime(raw)
-        encoded = base64.b64encode(raw).decode("ascii")
-        return f"data:{mime_type};base64,{encoded}"
-
-    @staticmethod
-    def _detect_image_mime(raw: bytes) -> str:
-        if raw.startswith(b"\x89PNG\r\n\x1a\n"):
-            return "image/png"
-        if raw.startswith(b"\xff\xd8\xff"):
-            return "image/jpeg"
-        if raw.startswith((b"GIF87a", b"GIF89a")):
-            return "image/gif"
-        if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
-            return "image/webp"
-        return "application/octet-stream"
+    def _serialize_messages(self, messages: list[TextMessage | ImageMessage]) -> list[dict[str, Any]]:
+        serialized: list[dict[str, Any]] = []
+        for message in messages:
+            if not isinstance(message, (TextMessage, ImageMessage)):
+                raise TypeError("messages must contain TextMessage/ImageMessage objects")
+            serialized.append(to_oauth_message(message))
+        return serialized
 
     def _normalize_schema(self, schema: Any) -> dict[str, Any]:
         normalized = self._transform_schema_subset(self._inline_local_refs(schema))

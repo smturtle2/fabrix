@@ -11,6 +11,7 @@ from fabrix.errors import LLMOutputError
 from fabrix.graph.state import NextState
 from fabrix.graph.transitions import allowed_next_states
 from fabrix.llm.oauth_codex import OAuthCodexStateProvider
+from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools.registry import ToolRegistry
 
 
@@ -104,9 +105,7 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
     tool_schemas = ToolRegistry.from_callables([add_numbers]).schemas()
 
     await provider.generate_state(
-        task="hello",
-        images=None,
-        context={},
+        messages=[TextMessage(role="user", text="hello")],
         history=[],
         current_state=NextState.reasoning,
         step=1,
@@ -123,9 +122,7 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
     assert "tool_call" in state_schema["properties"]["next_state"]["enum"]
 
     await provider.generate_state(
-        task="hello",
-        images=None,
-        context={},
+        messages=[TextMessage(role="user", text="hello")],
         history=[],
         current_state=NextState.reasoning,
         step=2,
@@ -142,9 +139,7 @@ async def test_provider_prompt_serializes_non_json_values(fake_client: Any) -> N
     now = datetime(2026, 1, 2, 3, 4, 5)
 
     await provider.generate_state(
-        task="hello",
-        images=None,
-        context={"issued_at": now},
+        messages=[TextMessage(role="user", text="hello")],
         history=[
             {
                 "kind": "tool_result",
@@ -160,16 +155,14 @@ async def test_provider_prompt_serializes_non_json_values(fake_client: Any) -> N
         tool_schemas=[],
     )
 
-    prompt = fake_client.calls[-1]["prompt"]
+    prompt = fake_client.calls[-1]["messages"][0]["content"]
     assert "2026-01-02T03:04:05" in prompt
 
 
 def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     prompt = provider._build_prompt(
-        task="hello",
-        images=[],
-        context={},
+        messages=[TextMessage(role="user", text="hello")],
         history=[],
         current_state=NextState.reasoning,
         step=1,
@@ -184,9 +177,7 @@ def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> No
 def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     prompt = provider._build_prompt(
-        task="hello",
-        images=[],
-        context={},
+        messages=[TextMessage(role="user", text="hello")],
         history=[],
         current_state=NextState.reasoning,
         step=1,
@@ -202,63 +193,46 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
         "With a finite step budget, avoid long reasoning-only loops and transition "
         "to tool_call/response/finish as confidence grows."
     ) in prompt
-    assert "If Task is [not provided], infer user intent from images and context before choosing next_state." in prompt
+    assert "Infer user intent from input messages before choosing next_state." in prompt
 
 
 @pytest.mark.asyncio
-async def test_provider_passes_images_to_client_when_task_is_none(fake_client: Any) -> None:
+async def test_provider_passes_messages_to_client_in_order(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    images = ["https://example.com/image.png"]
+    messages = [
+        TextMessage(role="user", text="Describe this image"),
+        ImageMessage(
+            role="user",
+            image="https://example.com/image.png",
+            text="Focus on warnings",
+        ),
+        TextMessage(role="user", text="Focus on warnings"),
+    ]
 
     await provider.generate_state(
-        task=None,
-        images=images,
-        context={},
+        messages=messages,
         history=[],
         current_state=NextState.reasoning,
         step=1,
         tool_schemas=[],
     )
 
-    assert fake_client.calls[-1]["images"] == images
-    assert "Task: [not provided]" in fake_client.calls[-1]["prompt"]
-
-
-def test_provider_converts_bytes_image_to_data_url_with_detected_mime(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-
-    normalized = provider._normalize_images(
-        [
-            b"\x89PNG\r\n\x1a\n\x00",
-            b"\xff\xd8\xff\xe0\x00",
-            b"GIF89a\x00",
-            b"RIFF\x01\x02\x03\x04WEBP\x00",
-        ]
-    )
-
-    assert isinstance(normalized[0], str) and normalized[0].startswith("data:image/png;base64,")
-    assert isinstance(normalized[1], str) and normalized[1].startswith("data:image/jpeg;base64,")
-    assert isinstance(normalized[2], str) and normalized[2].startswith("data:image/gif;base64,")
-    assert isinstance(normalized[3], str) and normalized[3].startswith("data:image/webp;base64,")
-
-
-def test_provider_bytes_mime_fallback_to_octet_stream(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    normalized = provider._normalize_images([b"\x00\x01\x02"])
-
-    assert isinstance(normalized[0], str)
-    assert normalized[0].startswith("data:application/octet-stream;base64,")
+    sent_messages = fake_client.calls[-1]["messages"]
+    assert [item["role"] for item in sent_messages[1:]] == ["user", "user", "user"]
+    assert sent_messages[1]["content"] == "Describe this image"
+    content = sent_messages[2]["content"]
+    assert isinstance(content, list)
+    assert [part["type"] for part in content] == ["input_text", "input_image"]
+    assert sent_messages[3]["content"] == "Focus on warnings"
 
 
 @pytest.mark.asyncio
-async def test_provider_rejects_invalid_image_item_type(fake_client: Any) -> None:
+async def test_provider_rejects_non_message_objects(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
 
-    with pytest.raises(TypeError, match="images items must be str/Path/bytes"):
+    with pytest.raises(TypeError, match="messages must contain TextMessage/ImageMessage objects"):
         await provider.generate_state(
-            task="hello",
-            images=[123],  # type: ignore[list-item]
-            context={},
+            messages=[{"role": "user", "text": "hello"}],  # type: ignore[list-item]
             history=[],
             current_state=NextState.reasoning,
             step=1,

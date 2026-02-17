@@ -14,9 +14,9 @@ from fabrix.events.models import (
 from fabrix.graph.state import FinishState, NextState, ReasoningState, ResponseState, ToolCallState
 from fabrix.graph.transitions import validate_transition
 from fabrix.llm import StateProvider
+from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools.registry import ToolRegistry
 from fabrix.tools.runtime import ToolExecutionResult, execute_tool
-from fabrix.types import ImageInput
 
 
 class GraphExecutor:
@@ -34,11 +34,8 @@ class GraphExecutor:
     async def run_stream(
         self,
         *,
-        task: str | None,
-        images: ImageInput | list[ImageInput] | None = None,
-        context: dict[str, Any] | None = None,
+        messages: list[TextMessage | ImageMessage],
     ) -> AsyncIterator[AgentEvent]:
-        payload = context or {}
         history: list[dict[str, Any]] = []
         current_state = NextState.reasoning
         last_response = ""
@@ -47,9 +44,7 @@ class GraphExecutor:
         for step in range(1, self._max_steps + 1):
             try:
                 envelope = await self._state_provider.generate_state(
-                    task=task,
-                    images=images,
-                    context=payload,
+                    messages=messages,
                     history=history,
                     current_state=current_state,
                     step=step,

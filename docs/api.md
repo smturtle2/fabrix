@@ -6,14 +6,13 @@ Home: [README](../README.md) | [README.ko.md](../README.ko.md)
 ## Purpose & Scope
 
 This guide documents the public usage surface of Fabrix.
-It covers how to construct `Agent`, run tasks with `run_task_stream`, define tools, and handle streamed events.
-Internal implementation details are out of scope except where they affect observable behavior.
+It covers agent construction, `run_stream`, message models, and stream events.
 
 ## Requirements
 
 - Python `>=3.12`
 - Package: `pip install fabrix-ai`
-- Valid `oauth-codex` authentication for model calls in real runs
+- Valid `oauth-codex` authentication
 - Async runtime (examples use `asyncio`)
 
 ## Public Imports
@@ -28,24 +27,10 @@ from fabrix.events import (
     TaskFinishedEvent,
     ToolEvent,
 )
+from fabrix.messages import ImageMessage, TextMessage
 ```
 
-Public runtime entry point:
-
-- `fabrix.Agent`
-
-Public event models for stream consumers:
-
-- `fabrix.events.AgentEvent`
-- `fabrix.events.ReasoningEvent`
-- `fabrix.events.ToolEvent`
-- `fabrix.events.ResponseEvent`
-- `fabrix.events.TaskFinishedEvent`
-- `fabrix.events.TaskFailedEvent`
-
 ## Agent Construction
-
-Constructor signature:
 
 ```python
 Agent(
@@ -56,17 +41,67 @@ Agent(
 )
 ```
 
-Parameter behavior:
-
-- `instructions`: required developer instruction text.
-- `model`: model name passed to the provider. Default is `"gpt-5.3-codex"`.
-- `tools`: optional list of tool callables validated at construction time.
-
 Notes:
 
-- Execution defaults are fixed internally: `max_steps=128`.
-- There is no public constructor parameter for per-tool timeout.
-- Incompatible tool schemas fail fast during agent setup.
+- Internal execution default: `max_steps=128`
+- No public per-tool timeout constructor option
+- Incompatible tool schemas fail fast at setup
+
+## Message Models
+
+Fabrix runtime input is a list of message model objects.
+
+```python
+class TextMessage(BaseModel):
+    role: str = "user"
+    text: str
+
+class ImageMessage(BaseModel):
+    role: str = "user"
+    image: str | Path | bytes
+    text: str | None = None
+```
+
+Rules:
+
+- `run_stream` accepts only `TextMessage` / `ImageMessage` instances.
+- Unknown fields are rejected at construction time.
+- `ImageMessage.image` supports URL/path/bytes.
+- `bytes` and local paths are converted to data URLs before model call.
+
+## Running Streams
+
+```python
+run_stream(
+    *,
+    messages: list[TextMessage | ImageMessage],
+) -> AsyncIterator[AgentEvent]
+```
+
+Validation:
+
+- Empty list -> `ValueError`
+- Non-message objects -> `TypeError`
+
+Text-only example:
+
+```python
+messages = [TextMessage(text="Use add_numbers to compute 3 + 9")]
+async for event in agent.run_stream(messages=messages):
+    ...
+```
+
+Multimodal example:
+
+```python
+messages = [
+    TextMessage(text="Describe this image"),
+    ImageMessage(image="https://example.com/cat.png"),
+    TextMessage(text="Focus on visible warnings"),
+]
+async for event in agent.run_stream(messages=messages):
+    ...
+```
 
 ## Tool Definition Rules
 
@@ -76,90 +111,19 @@ Accepted tool shape:
 def tool(payload: BaseModel) -> Any: ...
 ```
 
-Rules enforced by runtime:
+Runtime rules:
 
-- Exactly one parameter is required.
-- The parameter must be typed as a Pydantic `BaseModel` subclass.
-- Positional-only parameters are rejected.
-- Variadic `*args` and `**kwargs` are rejected.
-- The parameter must not have a default value.
-- Sync and async callables are both supported.
-
-Runtime argument validation:
-
-- Tool arguments must be a JSON object.
-- Argument keys must match payload model fields.
-- Extra keys return an error such as `"unexpected tool arguments: extra"`.
-
-## Running Tasks
-
-Method signature:
-
-```python
-run_task_stream(
-    task: str | None = None,
-    *,
-    images: ImageInput | list[ImageInput] | None = None,
-    context: dict[str, Any] | None = None,
-) -> AsyncIterator[AgentEvent]
-```
-
-Usage notes:
-
-- `task` is optional user task text.
-- `images` is optional and accepts `str | Path | bytes` (single item or list).
-- At least one of `task` or `images` must be provided.
-- When `bytes` are provided, Fabrix converts them into data URLs before model call.
-- `context` is optional structured data exposed to the model each step.
-- The stream yields events until a terminal event is emitted.
-
-Example:
-
-```python
-async for event in agent.run_task_stream(
-    "Analyze context.raw_rows and return a summary",
-    context={"raw_rows": [{"category": "A", "value": 3.2}]},
-):
-    ...
-```
-
-Image-only example:
-
-```python
-async for event in agent.run_task_stream(
-    task=None,
-    images=["https://example.com/incident.png"],
-):
-    ...
-```
-
-## Streaming Event Handling
-
-Recommended dispatch pattern:
-
-```python
-async for event in agent.run_task_stream("Use add_numbers to compute 3 + 9"):
-    if isinstance(event, ReasoningEvent):
-        print(event.reasoning, event.focus, event.next_state)
-    elif isinstance(event, ToolEvent):
-        if event.phase == "start":
-            print("calling", event.tool_name, event.arguments)
-        elif event.result is not None:
-            print("tool ok:", event.result.ok, "error:", event.result.error)
-    elif isinstance(event, ResponseEvent):
-        print(event.response)
-    elif isinstance(event, TaskFinishedEvent):
-        print(event.final_output, event.completion_reason)
-    elif isinstance(event, TaskFailedEvent):
-        print(event.error_code, event.message)
-```
+- Exactly one parameter
+- Parameter type must be Pydantic `BaseModel`
+- Tool arguments must be JSON objects with matching field names
+- Extra keys are rejected
 
 ## Event Reference
 
-Common fields for all events:
+Common fields:
 
 - `event_type: str`
-- `step: int` (current executor uses 1-based steps)
+- `step: int`
 - `timestamp: datetime` (UTC)
 
 Event-specific fields:
@@ -172,108 +136,41 @@ Event-specific fields:
 | `task_finished` | `TaskFinishedEvent` | `final_output`, `completion_reason` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
 
-`ReasoningEvent.reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
-
-`ToolEvent.result` is populated on `phase="finish"` and includes:
-
-- `ok: bool`
-- `output: Any | None`
-- `error: str | None`
-- `latency_ms: float`
-
 ## Failure Handling
 
 Terminal failures are emitted as `TaskFailedEvent`.
-Current `error_code` values include:
+Current error codes include:
 
-- `llm_error`: model/provider failed to produce a valid structured state.
-- `invalid_state_type`: model returned a state type different from expected current state.
-- `invalid_transition`: state transition violated graph rules.
-- `max_steps_reached`: no response/final output was produced by step 128.
+- `llm_error`
+- `invalid_state_type`
+- `invalid_transition`
+- `max_steps_reached`
 
-Tool call failures are non-terminal by themselves and are emitted on `ToolEvent(phase="finish")` with `result.ok == False`.
-Common tool errors include:
+Tool failures are non-terminal and reported in `ToolEvent(phase="finish")` with `result.ok == False`.
 
-- `tool not found: <name>`
-- `tool arguments must be a JSON object`
-- `unexpected tool arguments: <extra_key>`
+## Migration (Breaking)
 
-## Behavioral Guarantees
+Removed API:
 
-- Each run starts from `reasoning` state.
-- Tool calls inside one `tool_call` state execute sequentially in listed order.
-- Invalid state transitions terminate the run with `task_failed`.
-- When `finish` state is produced, `task_finished` is emitted and the stream ends.
-- If step limit is reached and at least one `response` exists, stream ends with `task_finished` using last response and `completion_reason="max_steps_reached"`.
-- If step limit is reached without response/final output, stream ends with `task_failed` and `error_code="max_steps_reached"`.
+- `run_task_stream(task, images, context)`
 
-## Complete Example
+New API:
 
-```python
-import asyncio
+- `run_stream(messages=[...])`
 
-from pydantic import BaseModel
+Input mapping:
 
-from fabrix import Agent
-from fabrix.events import (
-    ReasoningEvent,
-    ResponseEvent,
-    TaskFailedEvent,
-    TaskFinishedEvent,
-    ToolEvent,
-)
-
-
-class AddInput(BaseModel):
-    a: int
-    b: int
-
-
-def add_numbers(payload: AddInput) -> int:
-    return payload.a + payload.b
-
-
-async def main() -> None:
-    agent = Agent(
-        instructions="You are a precise assistant.",
-        model="gpt-5.3-codex",
-        tools=[add_numbers],
-    )
-
-    async for event in agent.run_task_stream("Use add_numbers to compute 3 + 9"):
-        print(f"[step={event.step}] {event.event_type}")
-
-        if isinstance(event, ReasoningEvent):
-            print("reasoning:", event.reasoning)
-            print("focus:", event.focus)
-        elif isinstance(event, ToolEvent):
-            if event.phase == "start":
-                print("tool call:", event.tool_name, event.arguments)
-            elif event.result is not None:
-                print("tool result:", event.result.model_dump())
-        elif isinstance(event, ResponseEvent):
-            print("response:", event.response)
-        elif isinstance(event, TaskFinishedEvent):
-            print("completion reason:", event.completion_reason)
-            print("final:", event.final_output)
-        elif isinstance(event, TaskFailedEvent):
-            print("failed:", event.error_code, event.message)
-
-
-asyncio.run(main())
-```
+- `task` -> `TextMessage(text="...")`
+- `images` -> `ImageMessage(image="..." | Path(...) | b"...")`
+- `context` -> include serialized context text in `TextMessage.text`
 
 ## Troubleshooting
 
-- `TypeError` about tool signature:
-  Define tools with exactly one Pydantic payload parameter.
-- `unexpected tool arguments: ...`:
-  Ensure model-generated arguments exactly match payload model field names.
-- `tool arguments must be a JSON object`:
-  Ensure tool call arguments are object-shaped JSON.
-- `ValueError: Either task or images must be provided`:
-  Provide `task`, `images`, or both when calling `run_task_stream(...)`.
+- `ValueError: messages must be a non-empty list of TextMessage/ImageMessage objects`:
+  pass at least one message model object.
+- `TypeError: messages must be a list of TextMessage/ImageMessage objects`:
+  do not pass dicts; instantiate message models.
 - `task_failed` with `invalid_transition`:
-  Tighten instructions so the model follows allowed graph transitions.
+  tighten instructions so the model follows allowed transitions.
 - `task_failed` with `llm_error`:
-  Check model/auth configuration and whether tool schemas are compatible with strict JSON schema conversion.
+  verify auth/model setup and tool-schema compatibility.

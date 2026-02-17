@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from fabrix.graph.state import NextState, StateEnvelope
-from fabrix.types import ImageInput
+from fabrix.messages import ImageMessage, TextMessage
 
 
 class StateProvider(Protocol):
@@ -12,9 +12,7 @@ class StateProvider(Protocol):
     async def generate_state(
         self,
         *,
-        task: str | None,
-        images: ImageInput | list[ImageInput] | None,
-        context: dict[str, Any],
+        messages: list[TextMessage | ImageMessage],
         history: list[dict[str, Any]],
         current_state: NextState,
         step: int,

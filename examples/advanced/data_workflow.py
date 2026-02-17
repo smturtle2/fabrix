@@ -14,6 +14,7 @@ from fabrix.events import (
     TaskFinishedEvent,
     ToolEvent,
 )
+from fabrix.messages import TextMessage
 
 RAW_DATA = [
     {"category": "A", "value": 12.4},
@@ -80,7 +81,7 @@ async def main() -> None:
     agent = Agent(
         instructions=(
             "You are a data workflow orchestrator. Execute this pipeline exactly once: "
-            "1) clean_records with context.raw_rows, "
+            "1) clean_records with rows from the user message, "
             "2) aggregate_by_category with the cleaned rows, "
             "3) render_report with summary_rows from aggregation output. "
             "Do not call the same tool repeatedly with the same arguments. "
@@ -91,10 +92,19 @@ async def main() -> None:
         tools=[clean_records, aggregate_by_category, render_report],
     )
 
-    task = "Analyze context.raw_rows and produce a category-level report."
-    context = {"raw_rows": RAW_DATA}
+    raw_rows_json = json.dumps(RAW_DATA, ensure_ascii=True)
+    messages = [
+        TextMessage(
+            role="user",
+            text=(
+                "Analyze the following raw rows and produce a category-level report. "
+                "Use the registered tools. "
+                f"raw_rows={raw_rows_json}"
+            ),
+        )
+    ]
 
-    async for event in agent.run_task_stream(task, context=context):
+    async for event in agent.run_stream(messages=messages):
         if isinstance(event, ReasoningEvent):
             print(f"[step={event.step}] reasoning={event.reasoning}")
             print(f"[step={event.step}] focus={event.focus} next={event.next_state}")

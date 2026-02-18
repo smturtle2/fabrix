@@ -22,7 +22,7 @@ class FakeClient:
         return {
             "state": {
                 "state_type": "reasoning",
-                "next_state": "finish",
+                "next_state": "response",
                 "reasoning": "done",
                 "focus": "finalize",
             }

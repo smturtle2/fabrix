@@ -119,7 +119,11 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
     state_schema = output_schema["json_schema"]["schema"]["properties"]["state"]
     state_type_schema = state_schema["properties"]["state_type"]
     assert state_type_schema.get("enum") == ["reasoning"]
-    assert "tool_call" in state_schema["properties"]["next_state"]["enum"]
+    assert state_schema["properties"]["next_state"]["enum"] == [
+        NextState.reasoning.value,
+        NextState.tool_call.value,
+        NextState.response.value,
+    ]
 
     await provider.generate_state(
         messages=[TextMessage(role="user", text="hello")],
@@ -130,7 +134,29 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
     )
     no_tool_output_schema = fake_client.calls[-1]["output_schema"]
     no_tool_state_schema = no_tool_output_schema["json_schema"]["schema"]["properties"]["state"]
-    assert "tool_call" not in no_tool_state_schema["properties"]["next_state"]["enum"]
+    assert no_tool_state_schema["properties"]["next_state"]["enum"] == [
+        NextState.reasoning.value,
+        NextState.tool_call.value,
+        NextState.response.value,
+    ]
+
+
+def test_response_schema_next_state_is_nullable(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    schema = provider._build_output_schema(current_state=NextState.response, tool_schemas=[])
+    next_state_schema = schema["json_schema"]["schema"]["properties"]["state"]["properties"]["next_state"]
+    any_of = next_state_schema.get("anyOf")
+    assert isinstance(any_of, list)
+    assert any(item.get("type") == "null" for item in any_of if isinstance(item, dict))
+    non_null = [
+        item for item in any_of if isinstance(item, dict) and item.get("type") != "null"
+    ]
+    assert len(non_null) == 1
+    assert non_null[0].get("enum") == [
+        NextState.reasoning.value,
+        NextState.tool_call.value,
+        NextState.response.value,
+    ]
 
 
 @pytest.mark.asyncio
@@ -186,14 +212,16 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
 
     assert "Reasoning loop strategy:" in prompt
     assert "Use Chain-of-Thought-style multi-step planning through short, visible decision traces." in prompt
+    assert "reasoning and focus must be English-only ASCII text." in prompt
     assert "Keep each reasoning step to 1-2 sentences with one concrete focus." in prompt
     assert "If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps." in prompt
     assert "Each step must add new evidence or a new decision; do not repeat prior reasoning." in prompt
     assert (
         "With a finite step budget, avoid long reasoning-only loops and transition "
-        "to tool_call/response/finish as confidence grows."
+        "to tool_call/response as confidence grows."
     ) in prompt
     assert "Infer user intent from input messages before choosing next_state." in prompt
+    assert "Terminate by setting next_state=null in response state." in prompt
 
 
 @pytest.mark.asyncio

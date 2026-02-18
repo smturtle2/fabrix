@@ -3,14 +3,13 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class NextState(StrEnum):
     reasoning = "reasoning"
     tool_call = "tool_call"
     response = "response"
-    finish = "finish"
 
 
 class BaseState(BaseModel):
@@ -18,7 +17,10 @@ class BaseState(BaseModel):
         description="Current node type in the execution graph."
     )
     next_state: NextState = Field(
-        description="Next node that the executor should transition to after this state."
+        description=(
+            "Next node that the executor should transition to after this state. "
+            "Set next_state=null only in response state to terminate after emitting the response event."
+        )
     )
 
 
@@ -55,6 +57,13 @@ class ReasoningState(BaseState):
         description="Short, concrete objective for this current step.",
     )
 
+    @field_validator("reasoning", "focus")
+    @classmethod
+    def _validate_english_ascii_only(cls, value: str) -> str:
+        if not value.isascii():
+            raise ValueError("reasoning/focus must use English ASCII characters only")
+        return value
+
 
 class ToolCallState(BaseState):
     state_type: Literal["tool_call"] = Field(
@@ -72,6 +81,12 @@ class ResponseState(BaseState):
         default="response",
         description="Response node: emit an intermediate user-facing message.",
     )
+    next_state: NextState | None = Field(
+        description=(
+            "Next node that the executor should transition to after this response. "
+            "Use null to terminate immediately after emitting this response event."
+        )
+    )
     response: str = Field(
         min_length=1,
         description="Natural-language message content for this intermediate response.",
@@ -82,23 +97,8 @@ class ResponseState(BaseState):
     )
 
 
-class FinishState(BaseState):
-    state_type: Literal["finish"] = Field(
-        default="finish",
-        description="Terminal node: complete the task with final output.",
-    )
-    final_output: str = Field(
-        min_length=1,
-        description="Final user-facing output returned when the task completes.",
-    )
-    completion_reason: str = Field(
-        min_length=1,
-        description="Short machine-readable reason describing why execution finished.",
-    )
-
-
 AgentState = Annotated[
-    ReasoningState | ToolCallState | ResponseState | FinishState,
+    ReasoningState | ToolCallState | ResponseState,
     Field(
         discriminator="state_type",
         description="Tagged union of all graph state payloads, discriminated by state_type.",

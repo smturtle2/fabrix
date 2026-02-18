@@ -4,15 +4,8 @@ import pytest
 from pydantic import BaseModel
 
 from fabrix.agent import _DEFAULT_MAX_STEPS, Agent
-from fabrix.events import (
-    ReasoningEvent,
-    ResponseEvent,
-    TaskFailedEvent,
-    TaskFinishedEvent,
-    ToolEvent,
-)
+from fabrix.events import ReasoningEvent, ResponseEvent, TaskFailedEvent, ToolEvent
 from fabrix.graph.state import (
-    FinishState,
     NextState,
     ReasoningState,
     ResponseState,
@@ -109,14 +102,14 @@ async def test_stream_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch,
         [
             ReasoningState(
-                next_state=NextState.finish,
+                next_state=NextState.response,
                 reasoning="Analyze the image first",
                 focus="visual inspection",
             ),
-            FinishState(
-                next_state=NextState.finish,
-                final_output="image analyzed",
-                completion_reason="done",
+            ResponseState(
+                next_state=None,
+                response="image analyzed",
+                audience="user",
             ),
         ],
     )
@@ -127,13 +120,11 @@ async def test_stream_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch) 
         tools=[add_numbers],
     )
 
-    messages = [
-        ImageMessage(role="user", image="https://example.com/input.png")
-    ]
+    messages = [ImageMessage(role="user", image="https://example.com/input.png")]
     events = [event async for event in agent.run_stream(messages=messages)]
 
-    assert isinstance(events[-1], TaskFinishedEvent)
-    assert events[-1].final_output == "image analyzed"
+    assert isinstance(events[-1], ResponseEvent)
+    assert events[-1].response == "image analyzed"
 
 
 @pytest.mark.asyncio
@@ -145,16 +136,16 @@ async def test_stream_forwards_messages_to_state_provider(monkeypatch: pytest.Mo
         if kwargs["current_state"] == NextState.reasoning:
             return StateEnvelope(
                 state=ReasoningState(
-                    next_state=NextState.finish,
+                    next_state=NextState.response,
                     reasoning="ready",
-                    focus="finish soon",
+                    focus="respond now",
                 )
             )
         return StateEnvelope(
-            state=FinishState(
-                next_state=NextState.finish,
-                final_output="done",
-                completion_reason="done",
+            state=ResponseState(
+                next_state=None,
+                response="done",
+                audience="user",
             )
         )
 
@@ -169,9 +160,51 @@ async def test_stream_forwards_messages_to_state_provider(monkeypatch: pytest.Mo
     messages = [_text_message("hello")]
     events = [event async for event in agent.run_stream(messages=messages)]
 
-    assert isinstance(events[-1], TaskFinishedEvent)
+    assert isinstance(events[-1], ResponseEvent)
     assert calls
     assert calls[0]["messages"] == messages
+
+
+@pytest.mark.asyncio
+async def test_response_none_terminates_without_extra_state_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_count = 0
+
+    async def fake_generate_state(self, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal call_count
+        call_count += 1
+        if kwargs["current_state"] == NextState.reasoning:
+            return StateEnvelope(
+                state=ReasoningState(
+                    next_state=NextState.response,
+                    reasoning="answering now",
+                    focus="final response",
+                )
+            )
+        if kwargs["current_state"] == NextState.response:
+            return StateEnvelope(
+                state=ResponseState(
+                    next_state=None,
+                    response="final answer",
+                    audience="user",
+                )
+            )
+        raise AssertionError("generate_state must not be called after terminal response")
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "generate_state", fake_generate_state)
+
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    events = [event async for event in agent.run_stream(messages=[_text_message("end now")])]
+
+    assert call_count == 2
+    assert isinstance(events[-1], ResponseEvent)
+    assert events[-1].response == "final answer"
 
 
 @pytest.mark.asyncio
@@ -194,14 +227,9 @@ async def test_stream_emits_events_in_expected_order(monkeypatch: pytest.MonkeyP
                 focus="user response",
             ),
             ResponseState(
-                next_state=NextState.finish,
+                next_state=None,
                 response="The sum is 7.",
                 audience="user",
-            ),
-            FinishState(
-                next_state=NextState.finish,
-                final_output="7",
-                completion_reason="done",
             ),
         ],
     )
@@ -221,8 +249,8 @@ async def test_stream_emits_events_in_expected_order(monkeypatch: pytest.MonkeyP
     assert tool_events[-1].result is not None
     assert tool_events[-1].result.ok is True
     assert isinstance(tool_events[-1].result.output, ToolOutput)
-    assert isinstance(events[-1], TaskFinishedEvent)
-    assert events[-1].final_output == "7"
+    assert isinstance(events[-1], ResponseEvent)
+    assert events[-1].response == "The sum is 7."
 
 
 @pytest.mark.asyncio
@@ -236,21 +264,17 @@ async def test_stream_executes_multiple_tools_sequentially(monkeypatch: pytest.M
                 focus="sequential",
             ),
             ToolCallState(
-                next_state=NextState.reasoning,
-                tool_calls=[
-                    {"name": "slow_double", "arguments": {"value": 2}},
-                    {"name": "slow_double", "arguments": {"value": 3}},
-                ],
+                next_state=NextState.tool_call,
+                tool_calls=[{"name": "slow_double", "arguments": {"value": 2}}],
             ),
-            ReasoningState(
-                next_state=NextState.finish,
-                reasoning="Tools done",
-                focus="finalize",
+            ToolCallState(
+                next_state=NextState.response,
+                tool_calls=[{"name": "slow_double", "arguments": {"value": 3}}],
             ),
-            FinishState(
-                next_state=NextState.finish,
-                final_output="done",
-                completion_reason="done",
+            ResponseState(
+                next_state=None,
+                response="done",
+                audience="user",
             ),
         ],
     )
@@ -269,34 +293,59 @@ async def test_stream_executes_multiple_tools_sequentially(monkeypatch: pytest.M
         if event.phase == "finish":
             assert event.result is not None
             assert event.result.ok is True
+    assert isinstance(events[-1], ResponseEvent)
 
 
 @pytest.mark.asyncio
-async def test_invalid_transition_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_all_to_all_state_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_provider_states(
         monkeypatch,
         [
             ReasoningState(
                 next_state=NextState.tool_call,
-                reasoning="Need tool",
-                focus="math",
+                reasoning="Route to tool call",
+                focus="transition 1",
             ),
             ToolCallState(
-                next_state=NextState.finish,
-                tool_calls=[{"name": "add_numbers", "arguments": {"a": 1, "b": 2}}],
+                next_state=NextState.response,
+                tool_calls=[{"name": "add_numbers", "arguments": {"a": 1, "b": 1}}],
+            ),
+            ResponseState(
+                next_state=NextState.reasoning,
+                response="intermediate",
+                audience="user",
+            ),
+            ReasoningState(
+                next_state=NextState.response,
+                reasoning="switch to response",
+                focus="transition 4",
+            ),
+            ResponseState(
+                next_state=NextState.tool_call,
+                response="one more tool",
+                audience="user",
+            ),
+            ToolCallState(
+                next_state=NextState.response,
+                tool_calls=[{"name": "add_numbers", "arguments": {"a": 2, "b": 3}}],
+            ),
+            ResponseState(
+                next_state=None,
+                response="final",
+                audience="user",
             ),
         ],
     )
 
     agent = Agent(
-        instructions="Follow the graph.",
+        instructions="Follow graph.",
         model="gpt-5.3-codex",
         tools=[add_numbers],
     )
 
-    events = [event async for event in agent.run_stream(messages=[_text_message("invalid transition")])]
-    assert isinstance(events[-1], TaskFailedEvent)
-    assert events[-1].error_code == "invalid_transition"
+    events = [event async for event in agent.run_stream(messages=[_text_message("all transitions")])]
+    assert isinstance(events[-1], ResponseEvent)
+    assert events[-1].response == "final"
 
 
 @pytest.mark.asyncio
@@ -310,18 +359,13 @@ async def test_tool_errors_are_emitted(monkeypatch: pytest.MonkeyPatch) -> None:
                 focus="validation",
             ),
             ToolCallState(
-                next_state=NextState.reasoning,
+                next_state=NextState.response,
                 tool_calls=[{"name": "missing_tool", "arguments": {"a": 1}}],
             ),
-            ReasoningState(
-                next_state=NextState.finish,
-                reasoning="done",
-                focus="finish",
-            ),
-            FinishState(
-                next_state=NextState.finish,
-                final_output="done",
-                completion_reason="done",
+            ResponseState(
+                next_state=None,
+                response="done",
+                audience="user",
             ),
         ],
     )
@@ -343,7 +387,9 @@ async def test_tool_errors_are_emitted(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_steps_without_response_emits_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_max_steps_without_response_emits_no_terminal_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_provider_loop(monkeypatch)
 
     agent = Agent(
@@ -353,45 +399,6 @@ async def test_max_steps_without_response_emits_failure(monkeypatch: pytest.Monk
     )
 
     events = [event async for event in agent.run_stream(messages=[_text_message("loop")])]
-    assert isinstance(events[-1], TaskFailedEvent)
-    assert events[-1].step == _DEFAULT_MAX_STEPS
-    assert events[-1].error_code == "max_steps_reached"
-
-
-@pytest.mark.asyncio
-async def test_max_steps_uses_last_response_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_provider_states(
-        monkeypatch,
-        [
-            ReasoningState(
-                next_state=NextState.response,
-                reasoning="Send intermediate response",
-                focus="respond",
-            ),
-            ResponseState(
-                next_state=NextState.reasoning,
-                response="Working on it.",
-                audience="user",
-            ),
-            *[
-                ReasoningState(
-                    next_state=NextState.reasoning,
-                    reasoning="Still working",
-                    focus="continue",
-                )
-                for _ in range(_DEFAULT_MAX_STEPS - 2)
-            ],
-        ],
-    )
-
-    agent = Agent(
-        instructions="Keep reasoning.",
-        model="gpt-5.3-codex",
-        tools=[add_numbers],
-    )
-
-    events = [event async for event in agent.run_stream(messages=[_text_message("loop")])]
-    assert isinstance(events[-1], TaskFinishedEvent)
-    assert events[-1].step == _DEFAULT_MAX_STEPS
-    assert events[-1].completion_reason == "max_steps_reached"
-    assert events[-1].final_output == "Working on it."
+    assert len(events) == _DEFAULT_MAX_STEPS
+    assert isinstance(events[-1], ReasoningEvent)
+    assert not any(isinstance(event, TaskFailedEvent) for event in events)

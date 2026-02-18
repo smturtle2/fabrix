@@ -4,7 +4,6 @@ from .models import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "ReasoningEvent",
     "ToolEvent",
     "ResponseEvent",
-    "TaskFinishedEvent",
     "TaskFailedEvent",
 ]

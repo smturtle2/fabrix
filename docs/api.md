@@ -24,7 +24,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import ImageMessage, TextMessage
@@ -141,8 +140,11 @@ Event-specific fields:
 | `reasoning` | `ReasoningEvent` | `reasoning`, `focus`, `next_state` |
 | `tool` | `ToolEvent` | `phase`, `tool_name`, `call_id`, `arguments`, `result` |
 | `response` | `ResponseEvent` | `response` |
-| `task_finished` | `TaskFinishedEvent` | `final_output`, `completion_reason` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
+
+Completion rule:
+
+- A successful run ends immediately after a `response` event emitted from `response` state with `next_state=null`.
 
 ## Failure Handling
 
@@ -151,8 +153,6 @@ Current error codes include:
 
 - `llm_error`
 - `invalid_state_type`
-- `invalid_transition`
-- `max_steps_reached`
 
 Tool failures are non-terminal and reported in `ToolEvent(phase="finish")` with `result.ok == False`.
 Successful tool results expose typed payloads in `result.output: ToolOutput`.
@@ -184,7 +184,7 @@ Tool return mapping:
   pass at least one message model object.
 - `TypeError: messages must be a list of TextMessage/ImageMessage objects`:
   do not pass dicts; instantiate message models.
-- `task_failed` with `invalid_transition`:
-  tighten instructions so the model follows allowed transitions.
+- Stream ends without a terminal event:
+  ensure the final `response` state sets `next_state` to `null`.
 - `task_failed` with `llm_error`:
   verify auth/model setup and tool-schema compatibility.

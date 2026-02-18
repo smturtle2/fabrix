@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from fabrix.graph.state import NextState, ReasoningState, StateEnvelope
+from fabrix.graph.state import (
+    NextState,
+    ReasoningState,
+    ResponseState,
+    StateEnvelope,
+    ToolCallState,
+)
 
 
 def test_state_requires_next_state() -> None:
@@ -23,3 +29,24 @@ def test_state_envelope_discriminator_parse() -> None:
     parsed = StateEnvelope.model_validate(payload)
     assert parsed.state.state_type == "reasoning"
     assert parsed.state.next_state == NextState.response
+
+
+def test_response_state_allows_null_next_state() -> None:
+    state = ResponseState(next_state=None, response="done", audience="user")
+    assert state.next_state is None
+
+
+def test_reasoning_and_tool_call_reject_null_next_state() -> None:
+    with pytest.raises(ValidationError):
+        ReasoningState(next_state=None, reasoning="x", focus="y")  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError):
+        ToolCallState(next_state=None, tool_calls=[{"name": "x", "arguments": {}}])  # type: ignore[arg-type]
+
+
+def test_reasoning_and_focus_require_ascii() -> None:
+    with pytest.raises(ValidationError):
+        ReasoningState(next_state=NextState.response, reasoning="작업 중", focus="clarity")
+
+    with pytest.raises(ValidationError):
+        ReasoningState(next_state=NextState.response, reasoning="working", focus="정리")

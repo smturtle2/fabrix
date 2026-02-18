@@ -10,7 +10,7 @@ It provides a structured execution graph with streaming events for tool-driven w
 
 ## Key Features
 
-- Graph-based 4-state execution: `reasoning`, `tool_call`, `response`, `finish`
+- Graph-based 3-state execution: `reasoning`, `tool_call`, `response`
 - Structured state outputs powered by Pydantic models
 - Sequential tool execution with strict payload validation
 - Async streaming event API for step-by-step observability
@@ -34,7 +34,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import TextMessage
@@ -71,9 +70,6 @@ async def main() -> None:
                 print("tool result:", event.result.model_dump())
         elif isinstance(event, ResponseEvent):
             print("response:", event.response)
-        elif isinstance(event, TaskFinishedEvent):
-            print("completion reason:", event.completion_reason)
-            print("final:", event.final_output)
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 
@@ -132,10 +128,10 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `reasoning`
 - `tool` (`phase="start"` / `phase="finish"`)
 - `response`
-- `task_finished`
 - `task_failed`
 
 `reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
+Terminate by setting `next_state=null` in `response` state.
 
 ## Migration (Breaking)
 
@@ -172,5 +168,5 @@ Tool migration:
 
 - Public runtime entry point is `fabrix.Agent`.
 - Execution defaults are fixed internally: `max_steps=128` and no public per-tool timeout option.
-- If `max_steps` is reached and at least one `response` was emitted, the stream ends with `task_finished` (`completion_reason="max_steps_reached"`) using the last response.
-- If `max_steps` is reached before any response/final output, the stream ends with `task_failed` (`error_code="max_steps_reached"`).
+- On successful completion, the stream ends right after the final `response` event (`next_state=null` in response state).
+- If `max_steps` is reached, the stream ends without emitting an additional terminal event.

@@ -40,12 +40,6 @@ class ResponseEvent(BaseEvent):
     response: str
 
 
-class TaskFinishedEvent(BaseEvent):
-    event_type: Literal["task_finished"] = "task_finished"
-    final_output: str
-    completion_reason: str
-
-
 class TaskFailedEvent(BaseEvent):
     event_type: Literal["task_failed"] = "task_failed"
     error_code: str
@@ -57,7 +51,6 @@ AgentEvent = Annotated[
         ReasoningEvent
         | ToolEvent
         | ResponseEvent
-        | TaskFinishedEvent
         | TaskFailedEvent
     ),
     Field(discriminator="event_type"),

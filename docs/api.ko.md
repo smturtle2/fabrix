@@ -24,7 +24,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import ImageMessage, TextMessage
@@ -141,8 +140,11 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 | `reasoning` | `ReasoningEvent` | `reasoning`, `focus`, `next_state` |
 | `tool` | `ToolEvent` | `phase`, `tool_name`, `call_id`, `arguments`, `result` |
 | `response` | `ResponseEvent` | `response` |
-| `task_finished` | `TaskFinishedEvent` | `final_output`, `completion_reason` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
+
+종료 규칙:
+
+- 정상 완료는 `response` 상태에서 `next_state=null`로 `response` 이벤트를 내보낸 직후 종료됩니다.
 
 ## 실패 처리
 
@@ -151,8 +153,6 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 
 - `llm_error`
 - `invalid_state_type`
-- `invalid_transition`
-- `max_steps_reached`
 
 tool 실패는 non-terminal이며 `ToolEvent(phase="finish")`의 `result.ok == False`로 전달됩니다.
 성공한 경우 `result.output`은 `ToolOutput` 타입으로 제공됩니다.
@@ -184,7 +184,7 @@ tool 반환값 매핑:
   메시지 모델 객체를 최소 1개 이상 전달하세요.
 - `TypeError: messages must be a list of TextMessage/ImageMessage objects`:
   dict 대신 메시지 모델 인스턴스를 전달하세요.
-- `task_failed` + `invalid_transition`:
-  instructions를 보강해 허용 전이를 따르도록 유도하세요.
+- terminal 이벤트 없이 스트림이 종료되는 경우:
+  마지막 `response` 상태의 `next_state`를 `null`로 설정했는지 확인하세요.
 - `task_failed` + `llm_error`:
   인증/모델 설정과 tool schema 호환성을 확인하세요.

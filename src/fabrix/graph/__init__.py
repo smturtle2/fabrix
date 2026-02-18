@@ -1,7 +1,6 @@
 from .state import (
     AgentState,
     BaseState,
-    FinishState,
     NextState,
     PlannedToolCall,
     ReasoningState,
@@ -18,7 +17,6 @@ __all__ = [
     "ReasoningState",
     "ToolCallState",
     "ResponseState",
-    "FinishState",
     "AgentState",
     "StateEnvelope",
     "ALLOWED_TRANSITIONS",

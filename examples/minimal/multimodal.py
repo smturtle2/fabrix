@@ -12,7 +12,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import ImageMessage, TextMessage
@@ -48,9 +47,6 @@ def _print_event(event: AgentEvent) -> None:
             print("tool result:", event.result.model_dump())
     elif isinstance(event, ResponseEvent):
         print("response:", event.response)
-    elif isinstance(event, TaskFinishedEvent):
-        print("completion reason:", event.completion_reason)
-        print("final:", event.final_output)
     elif isinstance(event, TaskFailedEvent):
         print("failed:", event.error_code, event.message)
 

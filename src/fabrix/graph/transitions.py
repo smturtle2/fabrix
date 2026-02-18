@@ -7,11 +7,17 @@ ALLOWED_TRANSITIONS: dict[NextState, set[NextState]] = {
         NextState.reasoning,
         NextState.tool_call,
         NextState.response,
-        NextState.finish,
     },
-    NextState.tool_call: {NextState.reasoning},
-    NextState.response: {NextState.reasoning, NextState.finish},
-    NextState.finish: {NextState.finish},
+    NextState.tool_call: {
+        NextState.reasoning,
+        NextState.tool_call,
+        NextState.response,
+    },
+    NextState.response: {
+        NextState.reasoning,
+        NextState.tool_call,
+        NextState.response,
+    },
 }
 
 

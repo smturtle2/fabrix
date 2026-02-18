@@ -11,7 +11,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import TextMessage
@@ -86,8 +85,8 @@ async def main() -> None:
             "2) aggregate_by_category with the cleaned rows, "
             "3) render_report with summary_rows from aggregation output. "
             "Do not call the same tool repeatedly with the same arguments. "
-            "After render_report succeeds, immediately emit finish state with final_output "
-            "equal to render_report output."
+            "After render_report succeeds, immediately emit response state with next_state "
+            "set to null and response equal to render_report output."
         ),
         model="gpt-5.3-codex",
         tools=[clean_records, aggregate_by_category, render_report],
@@ -118,9 +117,6 @@ async def main() -> None:
                     print(f"[step={event.step}] tool_error={event.result.error}")
         elif isinstance(event, ResponseEvent):
             print(f"[step={event.step}] response={event.response}")
-        elif isinstance(event, TaskFinishedEvent):
-            print("completion reason:", event.completion_reason)
-            print("final report:", event.final_output)
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 

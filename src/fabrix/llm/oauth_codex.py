@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 from fabrix.errors import LLMOutputError
 from fabrix.graph.state import (
-    FinishState,
     NextState,
     ReasoningState,
     ResponseState,
@@ -35,12 +34,11 @@ _UNSUPPORTED_SCHEMA_KEYWORDS = {
 
 _STATE_MODEL_BY_STATE: dict[
     NextState,
-    type[ReasoningState | ToolCallState | ResponseState | FinishState],
+    type[ReasoningState | ToolCallState | ResponseState],
 ] = {
     NextState.reasoning: ReasoningState,
     NextState.tool_call: ToolCallState,
     NextState.response: ResponseState,
-    NextState.finish: FinishState,
 }
 
 
@@ -65,7 +63,7 @@ class OAuthCodexStateProvider:
                 tool_schemas=tool_schemas,
             )
 
-        for state in (NextState.reasoning, NextState.response, NextState.finish):
+        for state in (NextState.reasoning, NextState.response):
             self._build_output_schema(
                 current_state=state,
                 tool_schemas=tool_schemas,
@@ -167,9 +165,9 @@ class OAuthCodexStateProvider:
         next_state_schema = properties.get("next_state")
         if not isinstance(next_state_schema, dict):
             raise LLMOutputError(f"state schema for `{current_state.value}` missing next_state")
-        next_state_schema["enum"] = self._allowed_next_state_values(
-            current_state=current_state,
-            tool_schemas=tool_schemas,
+        self._apply_next_state_values(
+            schema=next_state_schema,
+            values=self._allowed_next_state_values(),
         )
 
         if current_state is NextState.tool_call:
@@ -233,20 +231,26 @@ class OAuthCodexStateProvider:
 
         return self._normalize_schema(strict_schema)
 
-    def _allowed_next_state_values(
-        self,
-        *,
-        current_state: NextState,
-        tool_schemas: list[dict[str, Any]],
-    ) -> list[str]:
-        allowed = list(allowed_next_states(current_state))
-        if not tool_schemas and NextState.tool_call in allowed:
-            allowed = [state for state in allowed if state is not NextState.tool_call]
+    @staticmethod
+    def _allowed_next_state_values() -> list[str]:
+        return [state.value for state in NextState]
 
-        values = [state.value for state in allowed]
-        if not values:
-            raise LLMOutputError(f"no allowed next_state available from {current_state.value}")
-        return values
+    def _apply_next_state_values(self, *, schema: dict[str, Any], values: list[str]) -> None:
+        if "enum" in schema:
+            schema["enum"] = values
+            return
+
+        any_of = schema.get("anyOf")
+        if isinstance(any_of, list):
+            for candidate in any_of:
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get("type") == "null":
+                    continue
+                candidate["enum"] = values
+                return
+
+        raise LLMOutputError("state schema next_state must define enum or anyOf")
 
     def _render_graph_rules(self) -> str:
         lines: list[str] = []
@@ -264,12 +268,9 @@ class OAuthCodexStateProvider:
         step: int,
         tool_schemas: list[dict[str, Any]],
     ) -> str:
-        allowed = self._allowed_next_state_values(
-            current_state=current_state,
-            tool_schemas=tool_schemas,
-        )
+        allowed = self._allowed_next_state_values()
         no_tools_line = (
-            "No tools are registered. Never choose next_state=tool_call.\n"
+            "No tools are registered. Avoid choosing next_state=tool_call.\n"
             if not tool_schemas
             else ""
         )
@@ -287,14 +288,15 @@ class OAuthCodexStateProvider:
             "- In tool_call state, include one or more tool_calls.\n"
             f"{no_tools_line}"
             "Response rules:\n"
-            "- response state is an intermediate user-facing reply.\n"
-            "- finish state must include final_output and completion_reason.\n"
+            "- response state emits a user-facing reply.\n"
+            "- Terminate by setting next_state=null in response state.\n"
             "Reasoning loop strategy:\n"
             "- Use Chain-of-Thought-style multi-step planning through short, visible decision traces.\n"
+            "- reasoning and focus must be English-only ASCII text.\n"
             "- Keep each reasoning step to 1-2 sentences with one concrete focus.\n"
             "- If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps.\n"
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
-            "- With a finite step budget, avoid long reasoning-only loops and transition to tool_call/response/finish as confidence grows.\n"
+            "- With a finite step budget, avoid long reasoning-only loops and transition to tool_call/response as confidence grows.\n"
             "- Infer user intent from input messages before choosing next_state.\n"
             "\n"
             "Developer instructions:\n"

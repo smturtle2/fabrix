@@ -8,11 +8,9 @@ from fabrix.events.models import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
-from fabrix.graph.state import FinishState, NextState, ReasoningState, ResponseState, ToolCallState
-from fabrix.graph.transitions import validate_transition
+from fabrix.graph.state import NextState, ReasoningState, ResponseState, ToolCallState
 from fabrix.llm import StateProvider
 from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools.registry import ToolRegistry
@@ -38,7 +36,6 @@ class GraphExecutor:
     ) -> AsyncIterator[AgentEvent]:
         history: list[dict[str, Any]] = []
         current_state = NextState.reasoning
-        last_response = ""
         tool_schemas = self._tool_registry.schemas()
 
         for step in range(1, self._max_steps + 1):
@@ -64,15 +61,6 @@ class GraphExecutor:
                     step=step,
                     error_code="invalid_state_type",
                     message=f"expected state_type `{current_state.value}`, got `{state.state_type}`",
-                )
-                return
-
-            is_valid, error_code = validate_transition(current_state, state.next_state)
-            if not is_valid:
-                yield TaskFailedEvent(
-                    step=step,
-                    error_code=error_code or "invalid_transition",
-                    message=f"transition {state.state_type} -> {state.next_state.value} is not allowed",
                 )
                 return
 
@@ -133,33 +121,12 @@ class GraphExecutor:
                     )
 
             if isinstance(state, ResponseState):
-                last_response = state.response
                 yield ResponseEvent(step=step, response=state.response)
                 history.append({"kind": "response", "step": step, "response": state.response})
-
-            if isinstance(state, FinishState):
-                yield TaskFinishedEvent(
-                    step=step,
-                    final_output=state.final_output,
-                    completion_reason=state.completion_reason,
-                )
-                return
+                if state.next_state is None:
+                    return
 
             current_state = state.next_state
-
-        if last_response:
-            yield TaskFinishedEvent(
-                step=self._max_steps,
-                final_output=last_response,
-                completion_reason="max_steps_reached",
-            )
-            return
-
-        yield TaskFailedEvent(
-            step=self._max_steps,
-            error_code="max_steps_reached",
-            message="max_steps reached before producing a response or final output",
-        )
 
     @staticmethod
     def _tool_failure_result(error: str) -> ToolExecutionResult:

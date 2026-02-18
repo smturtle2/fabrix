@@ -10,7 +10,7 @@ Fabrix는 `oauth-codex>=2.3.0` 위에서 동작하는 그래프 기반 에이전
 
 ## 핵심 기능
 
-- 그래프 기반 4-상태 실행: `reasoning`, `tool_call`, `response`, `finish`
+- 그래프 기반 3-상태 실행: `reasoning`, `tool_call`, `response`
 - Pydantic 모델 기반의 구조화된 상태 출력
 - 엄격한 페이로드 검증을 포함한 순차적 도구 실행
 - 단계별 관측이 가능한 async 스트리밍 이벤트 API
@@ -34,7 +34,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import TextMessage
@@ -71,9 +70,6 @@ async def main() -> None:
                 print("tool result:", event.result.model_dump())
         elif isinstance(event, ResponseEvent):
             print("response:", event.response)
-        elif isinstance(event, TaskFinishedEvent):
-            print("completion reason:", event.completion_reason)
-            print("final:", event.final_output)
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 
@@ -132,10 +128,10 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `reasoning`
 - `tool` (`phase="start"` / `phase="finish"`)
 - `response`
-- `task_finished`
 - `task_failed`
 
 `reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace / plan summary입니다.
+종료하려면 `response` 상태에서 `next_state=null`을 설정하면 됩니다.
 
 ## 마이그레이션 (브레이킹)
 
@@ -172,5 +168,5 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 
 - 공개 런타임 진입점은 `fabrix.Agent`입니다.
 - 실행 기본값은 내부 고정값입니다: `max_steps=128`, public per-tool timeout 옵션 없음.
-- `max_steps`에 도달했을 때 최소 1회 `response`가 있었으면 마지막 응답으로 `task_finished`를 내보내며 `completion_reason="max_steps_reached"`를 설정합니다.
-- 응답/최종 출력 없이 `max_steps`에 도달하면 `task_failed`와 `error_code="max_steps_reached"`로 종료됩니다.
+- 정상 완료 시 마지막 `response` 이벤트 직후 스트림이 종료됩니다 (`response` 상태에서 `next_state=null`).
+- `max_steps`에 도달하면 추가 terminal 이벤트 없이 스트림이 종료됩니다.

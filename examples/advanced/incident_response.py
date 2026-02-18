@@ -10,7 +10,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import TextMessage
@@ -250,7 +249,8 @@ async def main() -> None:
             "5) draft_external_update with service, severity, users_affected from step 2 and "
             "owner, escalation_channel, eta_minutes, actions from step 4. "
             "Do not repeat a tool call with identical arguments. After step 5 succeeds, "
-            "immediately emit finish state with final_output equal to draft_external_update output."
+            "immediately emit response state with next_state set to null and response equal to "
+            "draft_external_update output."
         ),
         model="gpt-5.3-codex",
         tools=[
@@ -287,9 +287,6 @@ async def main() -> None:
                     print(f"[step={event.step}] tool_error={event.result.error}")
         elif isinstance(event, ResponseEvent):
             print(f"[step={event.step}] response={event.response}")
-        elif isinstance(event, TaskFinishedEvent):
-            print("completion reason:", event.completion_reason)
-            print("external update:", event.final_output)
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 

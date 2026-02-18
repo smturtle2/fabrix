@@ -9,7 +9,6 @@ from fabrix.events import (
     ReasoningEvent,
     ResponseEvent,
     TaskFailedEvent,
-    TaskFinishedEvent,
     ToolEvent,
 )
 from fabrix.messages import TextMessage
@@ -30,7 +29,7 @@ async def main() -> None:
     agent = Agent(
         instructions=(
             "Solve the task accurately. Prefer tool usage for arithmetic tasks. "
-            "When done, return finish state with concise final_output."
+            "When done, return response state with next_state set to null."
         ),
         model="gpt-5.3-codex",
         tools=[add_numbers],
@@ -52,9 +51,6 @@ async def main() -> None:
                 print("tool result:", event.result.model_dump())
         elif isinstance(event, ResponseEvent):
             print("response:", event.response)
-        elif isinstance(event, TaskFinishedEvent):
-            print("completion reason:", event.completion_reason)
-            print("final:", event.final_output)
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 

@@ -16,11 +16,12 @@ class Agent:
     def __init__(
         self,
         *,
-        instructions: str,
+        instructions: str | Callable[[], str],
         model: str = DEFAULT_MODEL,
         tools: list[Callable[..., Any]] | None = None,
     ) -> None:
         self.tool_registry = ToolRegistry.from_callables(tools)
+        self._validate_instructions(instructions)
 
         provider = OAuthCodexStateProvider(
             instructions=instructions,
@@ -46,3 +47,9 @@ class Agent:
 
         async for event in self._executor.run_stream(messages=messages):
             yield event
+
+    @staticmethod
+    def _validate_instructions(instructions: str | Callable[[], str]) -> None:
+        if isinstance(instructions, str) or callable(instructions):
+            return
+        raise TypeError("instructions must be a string or a callable returning a string")

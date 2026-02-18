@@ -71,6 +71,40 @@ def test_agent_rejects_removed_init_parameters() -> None:
         )
 
 
+def test_agent_accepts_instruction_callable(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_provider_init(self: OAuthCodexStateProvider, **kwargs: object) -> None:
+        captured["instructions"] = kwargs["instructions"]
+
+    def fake_validate_tool_schemas(
+        self: OAuthCodexStateProvider, tool_schemas: list[dict[str, object]]
+    ) -> None:
+        del self, tool_schemas
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "__init__", fake_provider_init)
+    monkeypatch.setattr(OAuthCodexStateProvider, "validate_tool_schemas", fake_validate_tool_schemas)
+
+    Agent(
+        instructions=lambda: "Use strict policies.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    instruction_source = captured["instructions"]
+    assert callable(instruction_source)
+    assert instruction_source() == "Use strict policies."
+
+
+def test_agent_rejects_non_string_non_callable_instructions() -> None:
+    with pytest.raises(TypeError, match="instructions must be a string or a callable returning a string"):
+        Agent(
+            instructions=123,  # type: ignore[arg-type]
+            model="gpt-5.3-codex",
+            tools=[add_numbers],
+        )
+
+
 @pytest.mark.asyncio
 async def test_stream_rejects_when_messages_missing() -> None:
     agent = Agent(

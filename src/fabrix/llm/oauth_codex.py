@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Callable
 from datetime import date, datetime, time
 from enum import Enum
 from typing import Any
@@ -47,7 +48,7 @@ class OAuthCodexStateProvider:
     def __init__(
         self,
         *,
-        instructions: str,
+        instructions: str | Callable[[], str],
         client: OAuthCodexClient | None = None,
         model: str = DEFAULT_MODEL,
         reasoning_effort: ReasoningEffort = "medium",
@@ -283,6 +284,7 @@ class OAuthCodexStateProvider:
         step: int,
         tool_schemas: list[dict[str, Any]],
     ) -> str:
+        instructions = self._resolve_instructions()
         allowed = self._prompt_allowed_next_state_values(current_state=current_state)
         no_tools_line = (
             "No tools are registered. Avoid choosing next_state=tool_call.\n"
@@ -317,13 +319,19 @@ class OAuthCodexStateProvider:
             "- Infer user intent from input messages before choosing next_state.\n"
             "\n"
             "Developer instructions:\n"
-            f"{self._instructions}\n"
+            f"{instructions}\n"
             "\n"
             f"Step: {step}\n"
             f"Input messages JSON: {self._json_dumps(self._serialize_messages(messages))}\n"
             f"Available tools JSON schema: {self._json_dumps(tool_schemas)}\n"
             f"Execution history JSON: {self._json_dumps(history)}\n"
         )
+
+    def _resolve_instructions(self) -> str:
+        resolved = self._instructions() if callable(self._instructions) else self._instructions
+        if not isinstance(resolved, str):
+            raise TypeError("instructions must be a string or a callable returning a string")
+        return resolved
 
     @classmethod
     def _json_dumps(cls, value: Any) -> str:

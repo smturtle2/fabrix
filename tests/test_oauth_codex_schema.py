@@ -216,6 +216,57 @@ async def test_provider_prompt_serializes_non_json_values(fake_client: Any) -> N
     assert "2026-01-02T03:04:05" in prompt
 
 
+@pytest.mark.asyncio
+async def test_provider_resolves_instruction_callable_for_each_prompt(fake_client: Any) -> None:
+    call_count = 0
+
+    def dynamic_instructions() -> str:
+        nonlocal call_count
+        call_count += 1
+        return f"dynamic-{call_count}"
+
+    provider = OAuthCodexStateProvider(instructions=dynamic_instructions, client=fake_client)
+
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=2,
+        tool_schemas=[],
+    )
+
+    prompt_first = fake_client.calls[0]["messages"][0]["content"]
+    prompt_second = fake_client.calls[1]["messages"][0]["content"]
+    assert "Developer instructions:\ndynamic-1\n" in prompt_first
+    assert "Developer instructions:\ndynamic-2\n" in prompt_second
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_instruction_callable_returning_non_string(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(
+        instructions=lambda: 123,  # type: ignore[return-value]
+        client=fake_client,
+    )
+
+    with pytest.raises(TypeError, match="instructions must be a string or a callable returning a string"):
+        await provider.generate_state(
+            messages=[TextMessage(role="user", text="hello")],
+            history=[],
+            current_state=NextState.reasoning,
+            step=1,
+            tool_schemas=[],
+        )
+    assert not fake_client.calls
+
+
 def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     prompt = provider._build_prompt(

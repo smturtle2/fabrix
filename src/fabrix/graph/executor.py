@@ -69,8 +69,6 @@ class GraphExecutor:
                 )
                 return
 
-            history.append({"kind": "state", "step": step, "state": state.model_dump(mode="python")})
-
             if isinstance(state, ReasoningState):
                 yield ReasoningEvent(
                     step=step,
@@ -78,12 +76,31 @@ class GraphExecutor:
                     focus=state.focus,
                     next_state=state.next_state,
                 )
+                history.append(
+                    {
+                        "kind": "reasoning",
+                        "step": step,
+                        "reasoning": state.reasoning,
+                        "focus": state.focus,
+                        "next_state": state.next_state.value,
+                    }
+                )
 
             if isinstance(state, ToolCallState):
+                tool_call_history: list[dict[str, Any]] = []
+                tool_result_history: list[dict[str, Any]] = []
                 for idx, call in enumerate(state.tool_calls, start=1):
                     call_id = call.call_id or f"s{step}_c{idx}"
                     raw_arguments: Any = call.arguments
                     arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
+                    tool_call_history.append(
+                        {
+                            "name": call.name,
+                            "call_id": call_id,
+                            "arguments": arguments,
+                            "why": call.why,
+                        }
+                    )
 
                     yield ToolEvent(
                         step=step,
@@ -109,9 +126,8 @@ class GraphExecutor:
                         arguments=arguments,
                         result=result,
                     )
-                    history.append(
+                    tool_result_history.append(
                         {
-                            "kind": "tool_result",
                             "step": step,
                             "tool_name": call.name,
                             "call_id": call_id,
@@ -124,6 +140,15 @@ class GraphExecutor:
                             "error": result.error,
                         }
                     )
+                history.append(
+                    {
+                        "kind": "tool_call",
+                        "step": step,
+                        "next_state": state.next_state.value,
+                        "tool_calls": tool_call_history,
+                        "tool_results": tool_result_history,
+                    }
+                )
 
             if isinstance(state, ResponseState):
                 yield ResponseEvent(
@@ -135,6 +160,7 @@ class GraphExecutor:
                     {
                         "kind": "response",
                         "step": step,
+                        "next_state": state.next_state.value if state.next_state is not None else None,
                         "response": state.response,
                         "parts": (
                             [part.model_dump(mode="json") for part in state.parts]

@@ -327,7 +327,7 @@ class OAuthCodexStateProvider:
 
     @classmethod
     def _json_dumps(cls, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=True, default=cls._json_default)
+        return json.dumps(value, ensure_ascii=False, default=cls._json_default)
 
     @staticmethod
     def _json_default(value: Any) -> Any:

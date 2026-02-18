@@ -68,7 +68,7 @@ class ToolJSONPart(BaseModel):
     @classmethod
     def _validate_json_serializable(cls, value: Any) -> Any:
         try:
-            json.dumps(value, ensure_ascii=True)
+            json.dumps(value, ensure_ascii=False)
         except TypeError as exc:
             raise ValueError("data must be JSON-serializable") from exc
         return value

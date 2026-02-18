@@ -19,6 +19,7 @@ from fabrix.graph.state import (
     ToolCallState,
 )
 from fabrix.graph.transitions import allowed_next_states
+from fabrix.media import coerce_image_to_url
 from fabrix.messages import ImageMessage, TextMessage, to_oauth_message
 from fabrix.types import ReasoningEffort
 
@@ -412,8 +413,23 @@ class OAuthCodexStateProvider:
                         if isinstance(caption, str) and caption.strip():
                             parts.append({"type": "input_text", "text": caption})
                         image_url = output_part.get("image_url")
-                        if isinstance(image_url, str) and image_url:
-                            parts.append({"type": "input_image", "image_url": image_url})
+                        if isinstance(image_url, str) and image_url.strip():
+                            try:
+                                normalized_image_url = coerce_image_to_url(image_url.strip())
+                            except (FileNotFoundError, TypeError, ValueError) as exc:
+                                parts.append(
+                                    {
+                                        "type": "input_text",
+                                        "text": f"[tool_result image skipped: {exc}]",
+                                    }
+                                )
+                            else:
+                                parts.append(
+                                    {
+                                        "type": "input_image",
+                                        "image_url": normalized_image_url,
+                                    }
+                                )
                 return {"role": "user", "content": parts}
 
         if output is not None:

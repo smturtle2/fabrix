@@ -30,7 +30,15 @@ def test_tool_output_image_converts_local_path(tmp_path: Path) -> None:
     output = ToolOutput.image(image_file)
     assert output.parts[0].type == "image"
     assert isinstance(output.parts[0], ToolImagePart)
-    assert output.parts[0].image_url.startswith("data:image/png;base64,")
+    assert output.parts[0].image_url == str(image_file.resolve())
+
+
+def test_tool_output_image_converts_bytes_to_temp_path() -> None:
+    output = ToolOutput.image(b"\x89PNG\r\n\x1a\n\x00")
+    temp_path = Path(output.parts[0].image_url)
+    assert temp_path.is_absolute()
+    assert temp_path.is_file()
+    assert temp_path.suffix == ".png"
 
 
 def test_tool_output_json_rejects_non_serializable_data() -> None:
@@ -55,16 +63,33 @@ def test_tool_output_compose_accepts_mixed_parts() -> None:
 
 def test_tool_image_part_accepts_bytes_input() -> None:
     part = ToolImagePart(image_url=b"\x89PNG\r\n\x1a\n\x00")
-    assert part.image_url.startswith("data:image/png;base64,")
+    temp_path = Path(part.image_url)
+    assert temp_path.is_absolute()
+    assert temp_path.is_file()
+    assert temp_path.suffix == ".png"
 
 
 def test_tool_image_part_accepts_path_input(tmp_path: Path) -> None:
     image_file = tmp_path / "c.png"
     image_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
     part = ToolImagePart(image_url=image_file)
-    assert part.image_url.startswith("data:image/png;base64,")
+    assert part.image_url == str(image_file.resolve())
 
 
-def test_tool_image_part_preserves_non_path_string() -> None:
-    part = ToolImagePart(image_url="cdn.example.com/image.png")
-    assert part.image_url == "cdn.example.com/image.png"
+def test_tool_image_part_accepts_file_url_input(tmp_path: Path) -> None:
+    image_file = tmp_path / "d.png"
+    image_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+    part = ToolImagePart(image_url=image_file.as_uri())
+    assert part.image_url == str(image_file.resolve())
+
+
+def test_tool_image_part_preserves_data_url() -> None:
+    value = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+    part = ToolImagePart(image_url=value)
+    assert part.image_url == value
+
+
+def test_tool_image_part_preserves_unknown_scheme_string() -> None:
+    value = "ftp://example.com/image.png"
+    part = ToolImagePart(image_url=value)
+    assert part.image_url == value

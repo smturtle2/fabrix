@@ -124,7 +124,10 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `ToolTextPart(type="text", text="...")`
 - `ToolImagePart(type="image", image_url="...", caption=None)`
 - `ToolJSONPart(type="json", data={...})`
-- `ToolImagePart.image_url`은 URL/path/bytes 입력을 허용하고, 로컬 파일/bytes는 data URL로 정규화합니다.
+- `ToolImagePart.image_url`은 URL/path/bytes 입력을 허용합니다.
+- `http(s)`/`data:` 값은 그대로 유지됩니다.
+- `file://`, 로컬 path, bytes는 로컬 절대경로 참조로 정규화됩니다.
+- tool 히스토리를 모델 입력으로 직렬화할 때 로컬 이미지 참조는 다시 data URL로 변환됩니다.
 
 ## 이벤트 레퍼런스
 

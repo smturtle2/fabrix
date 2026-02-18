@@ -94,7 +94,7 @@ Fabrix 입력은 이제 `list[TextMessage | ImageMessage]`입니다.
 
 - 원격 URL (`https://...`)
 - 로컬 경로 (`Path` 또는 문자열 경로)
-- raw bytes (`bytes`) 입력 (내부에서 data URL로 인코딩)
+- raw bytes (`bytes`) 입력 (모델 호출 시 data URL로 정규화)
 
 ## 멀티모달 입력
 
@@ -125,6 +125,9 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - 런타임 인자는 payload 필드와 일치하는 JSON object여야 합니다.
 - 추가 인자 키는 허용되지 않습니다.
 - sync/async 도구를 모두 지원합니다.
+- `ToolOutput.image(...)`는 `http(s)`/`data:` 값을 그대로 유지합니다.
+- `ToolOutput.image(...)`는 `file://`, 로컬 path, bytes를 로컬 절대경로 참조로 정규화합니다.
+- LLM 히스토리 직렬화 시 로컬 이미지 참조는 다시 data URL로 정규화됩니다.
 
 ## 이벤트 스트림
 

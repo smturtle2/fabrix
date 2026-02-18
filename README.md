@@ -94,7 +94,7 @@ Fabrix input is now `list[TextMessage | ImageMessage]`.
 
 - remote URL (`https://...`)
 - local path (`Path` or string path)
-- raw bytes (`bytes`), encoded to a data URL internally
+- raw bytes (`bytes`), normalized to a data URL for model calls
 
 ## Multimodal Input
 
@@ -125,6 +125,9 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - Runtime arguments must be a JSON object matching payload fields.
 - Extra argument keys are rejected.
 - Both sync and async tools are supported.
+- `ToolOutput.image(...)` keeps `http(s)`/`data:` values as-is.
+- `ToolOutput.image(...)` normalizes `file://`, local paths, and bytes to local absolute file references.
+- During LLM history serialization, local image references are re-normalized to data URLs.
 
 ## Event Stream
 

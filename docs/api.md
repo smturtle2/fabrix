@@ -124,7 +124,10 @@ Runtime rules:
 - `ToolTextPart(type="text", text="...")`
 - `ToolImagePart(type="image", image_url="...", caption=None)`
 - `ToolJSONPart(type="json", data={...})`
-- `ToolImagePart.image_url` accepts URL/path/bytes inputs and normalizes local files/bytes to data URLs.
+- `ToolImagePart.image_url` accepts URL/path/bytes inputs.
+- `http(s)`/`data:` image values are preserved.
+- `file://`, local paths, and bytes are normalized to local absolute file references.
+- When tool history is serialized for model input, local image references are re-encoded to data URLs.
 
 ## Event Reference
 

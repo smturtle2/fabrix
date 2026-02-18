@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from fabrix.media import ImageInput, coerce_image_to_url
+from fabrix.media import ImageInput, coerce_image_to_tool_ref
 
 
 class ToolTextPart(BaseModel):
@@ -27,7 +27,7 @@ class ToolImagePart(BaseModel):
     @classmethod
     def _coerce_image_url(cls, value: Any) -> str:
         if isinstance(value, (bytes, Path)):
-            return coerce_image_to_url(value)
+            return coerce_image_to_tool_ref(value)
 
         if not isinstance(value, str):
             raise TypeError("image_url must be a URL/path string, Path, or bytes")
@@ -35,13 +35,7 @@ class ToolImagePart(BaseModel):
         stripped = value.strip()
         if not stripped:
             raise ValueError("image_url must be a non-empty string")
-        if stripped.startswith(("http://", "https://", "data:")):
-            return stripped
-
-        local_path = Path(stripped).expanduser()
-        if local_path.is_file():
-            return coerce_image_to_url(local_path)
-        return stripped
+        return coerce_image_to_tool_ref(stripped)
 
     @field_validator("caption")
     @classmethod
@@ -99,7 +93,7 @@ class ToolOutput(BaseModel):
         caption: str | None = None,
     ) -> ToolOutput:
         return cls(
-            parts=[ToolImagePart(image_url=coerce_image_to_url(image), caption=caption)]
+            parts=[ToolImagePart(image_url=coerce_image_to_tool_ref(image), caption=caption)]
         )
 
     @classmethod

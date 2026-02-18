@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -319,6 +320,86 @@ async def test_provider_appends_multimodal_history_image_parts(fake_client: Any)
     assert isinstance(content, list)
     assert [part["type"] for part in content] == ["input_text", "input_text", "input_image"]
     assert content[-1]["image_url"] == "https://example.com/tool.png"
+
+
+@pytest.mark.asyncio
+async def test_provider_converts_local_image_history_part_to_data_url(
+    fake_client: Any, tmp_path: Path
+) -> None:
+    image_file = tmp_path / "tool.png"
+    image_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[
+            {
+                "kind": "tool_result",
+                "step": 2,
+                "tool_name": "vision_tool",
+                "call_id": "c2",
+                "ok": True,
+                "output": {
+                    "parts": [
+                        {
+                            "type": "image",
+                            "image_url": str(image_file),
+                        }
+                    ]
+                },
+            }
+        ],
+        current_state=NextState.reasoning,
+        step=3,
+        tool_schemas=[],
+    )
+
+    sent_messages = fake_client.calls[-1]["messages"]
+    content = sent_messages[-1]["content"]
+    assert isinstance(content, list)
+    assert [part["type"] for part in content] == ["input_text", "input_image"]
+    assert content[-1]["image_url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_provider_skips_missing_local_image_history_part_with_warning(
+    fake_client: Any, tmp_path: Path
+) -> None:
+    missing_path = tmp_path / "missing.png"
+
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[
+            {
+                "kind": "tool_result",
+                "step": 2,
+                "tool_name": "vision_tool",
+                "call_id": "c2",
+                "ok": True,
+                "output": {
+                    "parts": [
+                        {
+                            "type": "image",
+                            "image_url": str(missing_path),
+                            "caption": "detected object",
+                        }
+                    ]
+                },
+            }
+        ],
+        current_state=NextState.reasoning,
+        step=3,
+        tool_schemas=[],
+    )
+
+    sent_messages = fake_client.calls[-1]["messages"]
+    content = sent_messages[-1]["content"]
+    assert isinstance(content, list)
+    assert [part["type"] for part in content] == ["input_text", "input_text", "input_text"]
+    assert content[1]["text"] == "detected object"
+    assert "tool_result image skipped:" in content[2]["text"]
+    assert not any(part["type"] == "input_image" for part in content)
 
 
 @pytest.mark.asyncio

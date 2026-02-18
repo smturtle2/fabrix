@@ -212,7 +212,7 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
 
     assert "Reasoning loop strategy:" in prompt
     assert "Use Chain-of-Thought-style multi-step planning through short, visible decision traces." in prompt
-    assert "reasoning and focus must be English-only ASCII text." in prompt
+    assert "Prefer English in reasoning and focus for consistency." in prompt
     assert "Keep each reasoning step to 1-2 sentences with one concrete focus." in prompt
     assert "If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps." in prompt
     assert "Each step must add new evidence or a new decision; do not repeat prior reasoning." in prompt

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class NextState(StrEnum):
@@ -50,19 +50,12 @@ class ReasoningState(BaseState):
     )
     reasoning: str = Field(
         min_length=1,
-        description="Short 1-2 sentence decision trace summary for this step.",
+        description="Short 1-2 sentence decision trace summary for this step. Prefer English text.",
     )
     focus: str = Field(
         min_length=1,
-        description="Short, concrete objective for this current step.",
+        description="Short, concrete objective for this current step. Prefer English text.",
     )
-
-    @field_validator("reasoning", "focus")
-    @classmethod
-    def _validate_english_ascii_only(cls, value: str) -> str:
-        if not value.isascii():
-            raise ValueError("reasoning/focus must use English ASCII characters only")
-        return value
 
 
 class ToolCallState(BaseState):

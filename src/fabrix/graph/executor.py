@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+from fabrix.errors import RetryableLLMOutputError
 from fabrix.events.models import (
     AgentEvent,
     ReasoningEvent,
@@ -16,6 +17,8 @@ from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools.registry import ToolRegistry
 from fabrix.tools.runtime import ToolExecutionResult, execute_tool
 
+_DEFAULT_LLM_RETRY_ATTEMPTS = 2
+
 
 class GraphExecutor:
     def __init__(
@@ -24,10 +27,12 @@ class GraphExecutor:
         state_provider: StateProvider,
         tool_registry: ToolRegistry,
         max_steps: int,
+        llm_retry_attempts: int = _DEFAULT_LLM_RETRY_ATTEMPTS,
     ) -> None:
         self._state_provider = state_provider
         self._tool_registry = tool_registry
         self._max_steps = max_steps
+        self._llm_retry_attempts = max(0, llm_retry_attempts)
 
     async def run_stream(
         self,
@@ -40,7 +45,7 @@ class GraphExecutor:
 
         for step in range(1, self._max_steps + 1):
             try:
-                envelope = await self._state_provider.generate_state(
+                envelope = await self._generate_state_with_retry(
                     messages=messages,
                     history=history,
                     current_state=current_state,
@@ -131,3 +136,36 @@ class GraphExecutor:
     @staticmethod
     def _tool_failure_result(error: str) -> ToolExecutionResult:
         return ToolExecutionResult(ok=False, error=error, latency_ms=0.0)
+
+    async def _generate_state_with_retry(
+        self,
+        *,
+        messages: list[TextMessage | ImageMessage],
+        history: list[dict[str, Any]],
+        current_state: NextState,
+        step: int,
+        tool_schemas: list[dict[str, Any]],
+    ) -> Any:
+        max_attempts = self._llm_retry_attempts + 1
+        last_error: RetryableLLMOutputError | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await self._state_provider.generate_state(
+                    messages=messages,
+                    history=history,
+                    current_state=current_state,
+                    step=step,
+                    tool_schemas=tool_schemas,
+                )
+            except RetryableLLMOutputError as exc:
+                last_error = exc
+                if attempt < max_attempts:
+                    continue
+
+        if last_error is None:
+            raise RuntimeError("retry loop exited without state or error")
+
+        raise RetryableLLMOutputError(
+            f"{last_error} (retry attempts exhausted: {self._llm_retry_attempts})"
+        ) from last_error

@@ -4,6 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from fabrix.agent import _DEFAULT_MAX_STEPS, Agent
+from fabrix.errors import RetryableLLMOutputError
 from fabrix.events import ReasoningEvent, ResponseEvent, TaskFailedEvent, ToolEvent
 from fabrix.graph.state import (
     NextState,
@@ -402,3 +403,66 @@ async def test_max_steps_without_response_emits_no_terminal_event(
     assert len(events) == _DEFAULT_MAX_STEPS
     assert isinstance(events[-1], ReasoningEvent)
     assert not any(isinstance(event, TaskFailedEvent) for event in events)
+
+
+@pytest.mark.asyncio
+async def test_retryable_llm_errors_are_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    call_count = 0
+
+    async def fake_generate_state(self, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal call_count
+        call_count += 1
+        if kwargs["current_state"] == NextState.reasoning and call_count == 1:
+            raise RetryableLLMOutputError("retry once")
+        if kwargs["current_state"] == NextState.reasoning:
+            return StateEnvelope(
+                state=ReasoningState(
+                    next_state=NextState.response,
+                    reasoning="ready",
+                    focus="answer",
+                )
+            )
+        return StateEnvelope(
+            state=ResponseState(
+                next_state=None,
+                response="done",
+                audience="user",
+            )
+        )
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "generate_state", fake_generate_state)
+
+    agent = Agent(
+        instructions="Follow graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    events = [event async for event in agent.run_stream(messages=[_text_message("retry")])]
+    assert isinstance(events[-1], ResponseEvent)
+    assert events[-1].response == "done"
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_retryable_llm_errors_fail_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    call_count = 0
+
+    async def fake_generate_state(self, **_):  # type: ignore[no-untyped-def]
+        nonlocal call_count
+        call_count += 1
+        raise RetryableLLMOutputError("always bad")
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "generate_state", fake_generate_state)
+
+    agent = Agent(
+        instructions="Follow graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    events = [event async for event in agent.run_stream(messages=[_text_message("retry fail")])]
+    assert isinstance(events[-1], TaskFailedEvent)
+    assert events[-1].error_code == "llm_error"
+    assert "retry attempts exhausted" in events[-1].message
+    assert call_count == 3

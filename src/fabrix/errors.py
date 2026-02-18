@@ -7,3 +7,7 @@ class FabrixError(Exception):
 
 class LLMOutputError(FabrixError):
     """Raised when structured LLM output is invalid."""
+
+
+class RetryableLLMOutputError(LLMOutputError):
+    """Raised when structured output generation can be retried."""

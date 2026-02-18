@@ -44,9 +44,7 @@ def test_reasoning_and_tool_call_reject_null_next_state() -> None:
         ToolCallState(next_state=None, tool_calls=[{"name": "x", "arguments": {}}])  # type: ignore[arg-type]
 
 
-def test_reasoning_and_focus_require_ascii() -> None:
-    with pytest.raises(ValidationError):
-        ReasoningState(next_state=NextState.response, reasoning="작업 중", focus="clarity")
-
-    with pytest.raises(ValidationError):
-        ReasoningState(next_state=NextState.response, reasoning="working", focus="정리")
+def test_reasoning_and_focus_allow_non_ascii() -> None:
+    state = ReasoningState(next_state=NextState.response, reasoning="작업 중", focus="정리")
+    assert state.reasoning == "작업 중"
+    assert state.focus == "정리"

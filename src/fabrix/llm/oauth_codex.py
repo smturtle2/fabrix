@@ -8,9 +8,9 @@ from typing import Any
 
 from oauth_codex import OAuthCodexClient
 from oauth_codex.tooling import build_strict_response_format
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from fabrix.errors import LLMOutputError
+from fabrix.errors import LLMOutputError, RetryableLLMOutputError
 from fabrix.graph.state import (
     NextState,
     ReasoningState,
@@ -103,7 +103,9 @@ class OAuthCodexStateProvider:
                 strict_output=True,
             )
         except Exception as exc:
-            raise LLMOutputError(f"failed to produce valid state output: {exc}") from exc
+            raise RetryableLLMOutputError(
+                f"failed to produce valid state output: {exc}"
+            ) from exc
 
         return self._parse_payload(payload)
 
@@ -112,10 +114,15 @@ class OAuthCodexStateProvider:
             try:
                 data = json.loads(payload)
             except json.JSONDecodeError as exc:
-                raise LLMOutputError("model returned non-JSON text for structured state") from exc
+                raise RetryableLLMOutputError(
+                    "model returned non-JSON text for structured state"
+                ) from exc
         else:
             data = payload
-        return StateEnvelope.model_validate(data)
+        try:
+            return StateEnvelope.model_validate(data)
+        except ValidationError as exc:
+            raise RetryableLLMOutputError(f"state envelope validation failed: {exc}") from exc
 
     def _build_output_schema(
         self,
@@ -292,7 +299,7 @@ class OAuthCodexStateProvider:
             "- Terminate by setting next_state=null in response state.\n"
             "Reasoning loop strategy:\n"
             "- Use Chain-of-Thought-style multi-step planning through short, visible decision traces.\n"
-            "- reasoning and focus must be English-only ASCII text.\n"
+            "- Prefer English in reasoning and focus for consistency.\n"
             "- Keep each reasoning step to 1-2 sentences with one concrete focus.\n"
             "- If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps.\n"
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"

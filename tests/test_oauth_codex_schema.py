@@ -89,6 +89,28 @@ def test_state_schema_preserves_pydantic_min_length_constraints(fake_client: Any
     assert "parts" in response_props
 
 
+def test_response_schema_json_part_data_has_explicit_type(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    response_schema = provider._build_output_schema(
+        current_state=NextState.response,
+        tool_schemas=[],
+    )
+    response_props = response_schema["json_schema"]["schema"]["properties"]["state"]["properties"]
+    parts_any_of = response_props["parts"]["anyOf"]
+    array_schema = next(
+        item for item in parts_any_of if isinstance(item, dict) and item.get("type") == "array"
+    )
+    item_any_of = array_schema["items"]["anyOf"]
+    json_part_schema = next(
+        item
+        for item in item_any_of
+        if isinstance(item, dict)
+        and item.get("properties", {}).get("type", {}).get("enum") == ["json"]
+    )
+    data_schema = json_part_schema["properties"]["data"]
+    assert "type" in data_schema
+
+
 def test_output_schema_has_no_unsupported_keywords_for_all_states(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     tool_schemas = ToolRegistry.from_callables([add_numbers]).schemas()

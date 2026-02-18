@@ -58,7 +58,11 @@ class ToolJSONPart(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["json"] = "json"
-    data: Any
+    data: Any = Field(
+        json_schema_extra={
+            "type": ["string", "number", "integer", "boolean", "array", "object", "null"]
+        }
+    )
 
     @field_validator("data")
     @classmethod

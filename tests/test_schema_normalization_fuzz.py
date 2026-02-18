@@ -186,3 +186,21 @@ def test_normalization_rejects_circular_refs(fake_client: Any) -> None:
 
     with pytest.raises(LLMOutputError, match="circular \\$ref detected"):
         provider._normalize_schema(schema)
+
+
+def test_normalization_rejects_type_union_array_without_items(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": ["string", "array"],
+            }
+        },
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+
+    with pytest.raises(LLMOutputError, match="array schema missing items"):
+        provider._normalize_schema(schema)

@@ -424,6 +424,7 @@ class OAuthCodexStateProvider:
         normalized = self._transform_schema_subset(self._inline_local_refs(schema))
         self._assert_schema_root_object(normalized)
         self._assert_no_unsupported_keywords(normalized)
+        self._assert_type_shape_consistency(normalized)
         self._assert_object_consistency(normalized)
         if not isinstance(normalized, dict):
             raise LLMOutputError("normalized schema must be a dict")
@@ -513,25 +514,62 @@ class OAuthCodexStateProvider:
             for item in node:
                 self._assert_no_unsupported_keywords(item)
 
+    def _assert_type_shape_consistency(self, node: Any, path: str = "$") -> None:
+        if isinstance(node, dict):
+            type_values = self._collect_schema_type_values(node.get("type"), path)
+
+            if "array" in type_values:
+                items = node.get("items")
+                if not isinstance(items, dict):
+                    raise LLMOutputError(f"array schema missing items at {path}")
+
+            if "object" in type_values:
+                self._assert_object_shape(node, path)
+
+            for key, value in node.items():
+                self._assert_type_shape_consistency(value, f"{path}.{key}")
+            return
+
+        if isinstance(node, list):
+            for idx, item in enumerate(node):
+                self._assert_type_shape_consistency(item, f"{path}[{idx}]")
+
+    def _collect_schema_type_values(self, schema_type: Any, path: str) -> set[str]:
+        if isinstance(schema_type, str):
+            return {schema_type}
+
+        if isinstance(schema_type, list):
+            values: set[str] = set()
+            for idx, type_name in enumerate(schema_type):
+                if not isinstance(type_name, str):
+                    raise LLMOutputError(f"schema type list must contain only strings at {path}.type[{idx}]")
+                values.add(type_name)
+            return values
+
+        return set()
+
+    def _assert_object_shape(self, node: dict[str, Any], path: str) -> None:
+        properties = node.get("properties")
+        required = node.get("required")
+        additional_properties = node.get("additionalProperties")
+
+        if not isinstance(properties, dict):
+            raise LLMOutputError(f"object schema missing properties at {path}")
+        if not isinstance(required, list):
+            raise LLMOutputError(f"object schema missing required list at {path}")
+        if required != list(properties.keys()):
+            raise LLMOutputError(
+                f"object schema required/properties mismatch at {path}: {required} vs {list(properties.keys())}"
+            )
+        if additional_properties is not False:
+            raise LLMOutputError(
+                f"object schema must set additionalProperties=false at {path}"
+            )
+
     def _assert_object_consistency(self, node: Any, path: str = "$") -> None:
         if isinstance(node, dict):
             if node.get("type") == "object":
-                properties = node.get("properties")
-                required = node.get("required")
-                additional_properties = node.get("additionalProperties")
-
-                if not isinstance(properties, dict):
-                    raise LLMOutputError(f"object schema missing properties at {path}")
-                if not isinstance(required, list):
-                    raise LLMOutputError(f"object schema missing required list at {path}")
-                if required != list(properties.keys()):
-                    raise LLMOutputError(
-                        f"object schema required/properties mismatch at {path}: {required} vs {list(properties.keys())}"
-                    )
-                if additional_properties is not False:
-                    raise LLMOutputError(
-                        f"object schema must set additionalProperties=false at {path}"
-                    )
+                self._assert_object_shape(node, path)
 
             for key, value in node.items():
                 self._assert_object_consistency(value, f"{path}.{key}")

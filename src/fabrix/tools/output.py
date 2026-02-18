@@ -60,7 +60,13 @@ class ToolJSONPart(BaseModel):
     type: Literal["json"] = "json"
     data: Any = Field(
         json_schema_extra={
-            "type": ["string", "number", "integer", "boolean", "array", "object", "null"]
+            "anyOf": [
+                {"type": "string"},
+                {"type": "number"},
+                {"type": "integer"},
+                {"type": "boolean"},
+                {"type": "null"},
+            ]
         }
     )
 

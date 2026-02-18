@@ -243,6 +243,13 @@ class OAuthCodexStateProvider:
     def _allowed_next_state_values() -> list[str]:
         return [state.value for state in NextState]
 
+    @staticmethod
+    def _prompt_allowed_next_state_values(*, current_state: NextState) -> list[str]:
+        allowed = [state.value for state in NextState]
+        if current_state is NextState.response:
+            return [*allowed, "null"]
+        return allowed
+
     def _apply_next_state_values(self, *, schema: dict[str, Any], values: list[str]) -> None:
         if "enum" in schema:
             schema["enum"] = values
@@ -276,7 +283,7 @@ class OAuthCodexStateProvider:
         step: int,
         tool_schemas: list[dict[str, Any]],
     ) -> str:
-        allowed = self._allowed_next_state_values()
+        allowed = self._prompt_allowed_next_state_values(current_state=current_state)
         no_tools_line = (
             "No tools are registered. Avoid choosing next_state=tool_call.\n"
             if not tool_schemas
@@ -291,7 +298,7 @@ class OAuthCodexStateProvider:
             "Graph rules:\n"
             f"{self._render_graph_rules()}\n"
             "Tool usage rules:\n"
-            "- Use tool_call state only when external computation/data access is needed.\n"
+            "- You MUST choose tool_call state only when external computation/data access is required.\n"
             "- In tool_call state, each arguments object must exactly match selected tool schema.\n"
             "- In tool_call state, include one or more tool_calls.\n"
             f"{no_tools_line}"
@@ -299,12 +306,12 @@ class OAuthCodexStateProvider:
             "- response state may emit plain text (response), structured parts, both, or neither.\n"
             "- For image output, prefer using parts with type=image.\n"
             "- Empty responses are allowed (response=null and parts=null).\n"
-            "- Terminate by setting next_state=null in response state.\n"
+            "- In response state, you MUST set next_state=null when the task is complete.\n"
             "Reasoning loop strategy:\n"
-            "- Use Chain-of-Thought-style multi-step planning through short, visible decision traces.\n"
+            "- You SHOULD use Chain-of-Thought-style multi-step planning with short, visible decision traces.\n"
             "- Prefer English in reasoning and focus for consistency.\n"
             "- Keep each reasoning step to 1-2 sentences with one concrete focus.\n"
-            "- If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps.\n"
+            "- If uncertainty remains, you SHOULD choose next_state=reasoning and resolve within several reasoning steps.\n"
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
             "- With a finite step budget, avoid long reasoning-only loops and transition to tool_call/response as confidence grows.\n"
             "- Infer user intent from input messages before choosing next_state.\n"

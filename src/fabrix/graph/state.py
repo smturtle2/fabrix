@@ -79,7 +79,7 @@ class ResponseState(BaseState):
     next_state: NextState | None = Field(
         description=(
             "Next node that the executor should transition to after this response. "
-            "Use null to terminate immediately after emitting this response event."
+            "You must set next_state to null to terminate immediately after emitting this response event."
         )
     )
     response: str | None = Field(

@@ -242,10 +242,16 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
     )
 
     assert "Reasoning loop strategy:" in prompt
-    assert "Use Chain-of-Thought-style multi-step planning through short, visible decision traces." in prompt
+    assert (
+        "You SHOULD use Chain-of-Thought-style multi-step planning with short, visible decision traces."
+        in prompt
+    )
     assert "Prefer English in reasoning and focus for consistency." in prompt
     assert "Keep each reasoning step to 1-2 sentences with one concrete focus." in prompt
-    assert "If uncertainty remains, choose next_state=reasoning; usually resolve within several reasoning steps." in prompt
+    assert (
+        "If uncertainty remains, you SHOULD choose next_state=reasoning and resolve within several reasoning steps."
+        in prompt
+    )
     assert "Each step must add new evidence or a new decision; do not repeat prior reasoning." in prompt
     assert (
         "With a finite step budget, avoid long reasoning-only loops and transition "
@@ -254,7 +260,28 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
     assert "Infer user intent from input messages before choosing next_state." in prompt
     assert "For image output, prefer using parts with type=image." in prompt
     assert "Empty responses are allowed (response=null and parts=null)." in prompt
-    assert "Terminate by setting next_state=null in response state." in prompt
+    assert "In response state, you MUST set next_state=null when the task is complete." in prompt
+
+
+def test_prompt_allowed_next_state_values_include_null_for_response_only(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    reasoning_prompt = provider._build_prompt(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+    response_prompt = provider._build_prompt(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.response,
+        step=2,
+        tool_schemas=[],
+    )
+
+    assert "Allowed next_state values now: ['reasoning', 'tool_call', 'response']." in reasoning_prompt
+    assert "Allowed next_state values now: ['reasoning', 'tool_call', 'response', 'null']." in response_prompt
 
 
 @pytest.mark.asyncio

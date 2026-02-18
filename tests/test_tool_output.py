@@ -51,3 +51,20 @@ def test_tool_output_compose_accepts_mixed_parts() -> None:
             {"type": "json", "data": {"score": 9}},
         ]
     }
+
+
+def test_tool_image_part_accepts_bytes_input() -> None:
+    part = ToolImagePart(image_url=b"\x89PNG\r\n\x1a\n\x00")
+    assert part.image_url.startswith("data:image/png;base64,")
+
+
+def test_tool_image_part_accepts_path_input(tmp_path: Path) -> None:
+    image_file = tmp_path / "c.png"
+    image_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+    part = ToolImagePart(image_url=image_file)
+    assert part.image_url.startswith("data:image/png;base64,")
+
+
+def test_tool_image_part_preserves_non_path_string() -> None:
+    part = ToolImagePart(image_url="cdn.example.com/image.png")
+    assert part.image_url == "cdn.example.com/image.png"

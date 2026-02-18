@@ -129,6 +129,101 @@ async def test_stream_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+async def test_stream_allows_empty_response_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_provider_states(
+        monkeypatch,
+        [
+            ReasoningState(
+                next_state=NextState.response,
+                reasoning="No content needed",
+                focus="emit empty response",
+            ),
+            ResponseState(
+                next_state=None,
+                response=None,
+                parts=None,
+                audience="user",
+            ),
+        ],
+    )
+
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    events = [event async for event in agent.run_stream(messages=[_text_message("empty response")])]
+    assert isinstance(events[-1], ResponseEvent)
+    assert events[-1].response is None
+    assert events[-1].parts is None
+
+
+@pytest.mark.asyncio
+async def test_stream_preserves_response_parts_in_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_generate_state(self, **kwargs):  # type: ignore[no-untyped-def]
+        step = kwargs["step"]
+        if step == 1:
+            return StateEnvelope(
+                state=ReasoningState(
+                    next_state=NextState.response,
+                    reasoning="Respond with an image part",
+                    focus="emit multimodal response",
+                )
+            )
+        if step == 2:
+            return StateEnvelope(
+                state=ResponseState(
+                    next_state=NextState.reasoning,
+                    response=None,
+                    parts=[{"type": "image", "image_url": "https://example.com/result.png"}],
+                    audience="user",
+                )
+            )
+        if step == 3:
+            history = kwargs["history"]
+            response_items = [item for item in history if item.get("kind") == "response"]
+            assert response_items
+            assert response_items[-1]["response"] is None
+            assert response_items[-1]["parts"] == [
+                {"type": "image", "image_url": "https://example.com/result.png", "caption": None}
+            ]
+            return StateEnvelope(
+                state=ReasoningState(
+                    next_state=NextState.response,
+                    reasoning="Wrap up after image response",
+                    focus="final answer",
+                )
+            )
+        if step == 4:
+            return StateEnvelope(
+                state=ResponseState(
+                    next_state=None,
+                    response="done",
+                    audience="user",
+                )
+            )
+
+        raise AssertionError(f"unexpected step: {step}")
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "generate_state", fake_generate_state)
+
+    agent = Agent(
+        instructions="Follow the graph.",
+        model="gpt-5.3-codex",
+        tools=[add_numbers],
+    )
+
+    events = [event async for event in agent.run_stream(messages=[_text_message("response parts")])]
+    response_events = [event for event in events if isinstance(event, ResponseEvent)]
+    assert len(response_events) == 2
+    assert response_events[0].response is None
+    assert response_events[0].parts is not None
+    assert response_events[0].parts[0].type == "image"
+    assert response_events[-1].response == "done"
+
+
+@pytest.mark.asyncio
 async def test_stream_forwards_messages_to_state_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 

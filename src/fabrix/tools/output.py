@@ -23,6 +23,26 @@ class ToolImagePart(BaseModel):
     image_url: str = Field(min_length=1)
     caption: str | None = None
 
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _coerce_image_url(cls, value: Any) -> str:
+        if isinstance(value, (bytes, Path)):
+            return coerce_image_to_url(value)
+
+        if not isinstance(value, str):
+            raise TypeError("image_url must be a URL/path string, Path, or bytes")
+
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("image_url must be a non-empty string")
+        if stripped.startswith(("http://", "https://", "data:")):
+            return stripped
+
+        local_path = Path(stripped).expanduser()
+        if local_path.is_file():
+            return coerce_image_to_url(local_path)
+        return stripped
+
     @field_validator("caption")
     @classmethod
     def _validate_caption(cls, value: str | None) -> str | None:

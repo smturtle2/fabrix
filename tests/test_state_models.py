@@ -36,6 +36,24 @@ def test_response_state_allows_null_next_state() -> None:
     assert state.next_state is None
 
 
+def test_response_state_allows_empty_payload() -> None:
+    state = ResponseState(next_state=None, response=None, parts=None, audience="user")
+    assert state.response is None
+    assert state.parts is None
+
+
+def test_response_state_allows_parts_only() -> None:
+    state = ResponseState(
+        next_state=None,
+        response=None,
+        parts=[{"type": "image", "image_url": "https://example.com/out.png"}],
+        audience="user",
+    )
+    assert state.response is None
+    assert state.parts is not None
+    assert state.parts[0].type == "image"
+
+
 def test_reasoning_and_tool_call_reject_null_next_state() -> None:
     with pytest.raises(ValidationError):
         ReasoningState(next_state=None, reasoning="x", focus="y")  # type: ignore[arg-type]

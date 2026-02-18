@@ -124,6 +124,7 @@ Runtime rules:
 - `ToolTextPart(type="text", text="...")`
 - `ToolImagePart(type="image", image_url="...", caption=None)`
 - `ToolJSONPart(type="json", data={...})`
+- `ToolImagePart.image_url` accepts URL/path/bytes inputs and normalizes local files/bytes to data URLs.
 
 ## Event Reference
 
@@ -139,8 +140,10 @@ Event-specific fields:
 | --- | --- | --- |
 | `reasoning` | `ReasoningEvent` | `reasoning`, `focus`, `next_state` |
 | `tool` | `ToolEvent` | `phase`, `tool_name`, `call_id`, `arguments`, `result` |
-| `response` | `ResponseEvent` | `response` |
+| `response` | `ResponseEvent` | `response`, `parts` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
+
+`ResponseEvent.response` and `ResponseEvent.parts` are both optional; both can be `None`.
 
 Completion rule:
 

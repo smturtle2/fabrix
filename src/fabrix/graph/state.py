@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from fabrix.tools.output import ToolPart
+
 
 class NextState(StrEnum):
     reasoning = "reasoning"
@@ -80,9 +82,13 @@ class ResponseState(BaseState):
             "Use null to terminate immediately after emitting this response event."
         )
     )
-    response: str = Field(
-        min_length=1,
-        description="Natural-language message content for this intermediate response.",
+    response: str | None = Field(
+        default=None,
+        description="Optional natural-language message content for this intermediate response.",
+    )
+    parts: list[ToolPart] | None = Field(
+        default=None,
+        description="Optional structured multimodal parts (text/image/json) for this response.",
     )
     audience: Literal["user", "system"] = Field(
         default="user",

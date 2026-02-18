@@ -124,6 +124,7 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `ToolTextPart(type="text", text="...")`
 - `ToolImagePart(type="image", image_url="...", caption=None)`
 - `ToolJSONPart(type="json", data={...})`
+- `ToolImagePart.image_url`은 URL/path/bytes 입력을 허용하고, 로컬 파일/bytes는 data URL로 정규화합니다.
 
 ## 이벤트 레퍼런스
 
@@ -139,8 +140,10 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 | --- | --- | --- |
 | `reasoning` | `ReasoningEvent` | `reasoning`, `focus`, `next_state` |
 | `tool` | `ToolEvent` | `phase`, `tool_name`, `call_id`, `arguments`, `result` |
-| `response` | `ResponseEvent` | `response` |
+| `response` | `ResponseEvent` | `response`, `parts` |
 | `task_failed` | `TaskFailedEvent` | `error_code`, `message` |
+
+`ResponseEvent.response`와 `ResponseEvent.parts`는 모두 optional이며, 둘 다 `None`일 수 있습니다.
 
 종료 규칙:
 

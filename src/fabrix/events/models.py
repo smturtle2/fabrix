@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from fabrix.graph.state import NextState
+from fabrix.tools.output import ToolPart
 from fabrix.tools.runtime import ToolExecutionResult
 
 
@@ -37,7 +38,8 @@ class ToolEvent(BaseEvent):
 
 class ResponseEvent(BaseEvent):
     event_type: Literal["response"] = "response"
-    response: str
+    response: str | None = None
+    parts: list[ToolPart] | None = None
 
 
 class TaskFailedEvent(BaseEvent):

@@ -286,7 +286,15 @@ async def main() -> None:
                 if event.result.error:
                     print(f"[step={event.step}] tool_error={event.result.error}")
         elif isinstance(event, ResponseEvent):
-            print(f"[step={event.step}] response={event.response}")
+            if event.response is not None:
+                print(f"[step={event.step}] response={event.response}")
+            if event.parts is not None:
+                print(
+                    f"[step={event.step}] parts="
+                    f"{[part.model_dump(mode='json') for part in event.parts]}"
+                )
+            if event.response is None and event.parts is None:
+                print(f"[step={event.step}] response=<empty>")
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 

@@ -83,7 +83,10 @@ def test_state_schema_preserves_pydantic_min_length_constraints(fake_client: Any
         tool_schemas=[],
     )
     response_props = response_schema["json_schema"]["schema"]["properties"]["state"]["properties"]
-    assert response_props["response"]["minLength"] == 1
+    response_any_of = response_props["response"]["anyOf"]
+    assert any(item.get("type") == "null" for item in response_any_of if isinstance(item, dict))
+    assert any(item.get("type") == "string" for item in response_any_of if isinstance(item, dict))
+    assert "parts" in response_props
 
 
 def test_output_schema_has_no_unsupported_keywords_for_all_states(fake_client: Any) -> None:
@@ -221,6 +224,8 @@ def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
         "to tool_call/response as confidence grows."
     ) in prompt
     assert "Infer user intent from input messages before choosing next_state." in prompt
+    assert "For image output, prefer using parts with type=image." in prompt
+    assert "Empty responses are allowed (response=null and parts=null)." in prompt
     assert "Terminate by setting next_state=null in response state." in prompt
 
 

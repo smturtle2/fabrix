@@ -126,8 +126,23 @@ class GraphExecutor:
                     )
 
             if isinstance(state, ResponseState):
-                yield ResponseEvent(step=step, response=state.response)
-                history.append({"kind": "response", "step": step, "response": state.response})
+                yield ResponseEvent(
+                    step=step,
+                    response=state.response,
+                    parts=state.parts,
+                )
+                history.append(
+                    {
+                        "kind": "response",
+                        "step": step,
+                        "response": state.response,
+                        "parts": (
+                            [part.model_dump(mode="json") for part in state.parts]
+                            if state.parts is not None
+                            else None
+                        ),
+                    }
+                )
                 if state.next_state is None:
                     return
 

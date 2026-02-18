@@ -46,7 +46,12 @@ def _print_event(event: AgentEvent) -> None:
         elif event.result is not None:
             print("tool result:", event.result.model_dump())
     elif isinstance(event, ResponseEvent):
-        print("response:", event.response)
+        if event.response is not None:
+            print("response:", event.response)
+        if event.parts is not None:
+            print("parts:", [part.model_dump(mode="json") for part in event.parts])
+        if event.response is None and event.parts is None:
+            print("response: <empty>")
     elif isinstance(event, TaskFailedEvent):
         print("failed:", event.error_code, event.message)
 

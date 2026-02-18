@@ -69,7 +69,12 @@ async def main() -> None:
             elif event.result is not None:
                 print("tool result:", event.result.model_dump())
         elif isinstance(event, ResponseEvent):
-            print("response:", event.response)
+            if event.response is not None:
+                print("response:", event.response)
+            if event.parts is not None:
+                print("parts:", [part.model_dump(mode="json") for part in event.parts])
+            if event.response is None and event.parts is None:
+                print("response: <empty>")
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 
@@ -131,6 +136,8 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `task_failed`
 
 `reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace / plan summary입니다.
+`response` 이벤트는 `response: str | None`과 구조화된 `parts`(text/image/json)를 모두 지원하며,
+두 필드가 모두 `None`인 빈 응답 이벤트도 허용됩니다.
 종료하려면 `response` 상태에서 `next_state=null`을 설정하면 됩니다.
 
 ## 마이그레이션 (브레이킹)

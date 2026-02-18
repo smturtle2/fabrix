@@ -69,7 +69,12 @@ async def main() -> None:
             elif event.result is not None:
                 print("tool result:", event.result.model_dump())
         elif isinstance(event, ResponseEvent):
-            print("response:", event.response)
+            if event.response is not None:
+                print("response:", event.response)
+            if event.parts is not None:
+                print("parts:", [part.model_dump(mode="json") for part in event.parts])
+            if event.response is None and event.parts is None:
+                print("response: <empty>")
         elif isinstance(event, TaskFailedEvent):
             print("failed:", event.error_code, event.message)
 
@@ -131,6 +136,8 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `task_failed`
 
 `reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
+`response` events now support both `response: str | None` and `parts` (structured text/image/json parts);
+both fields may be `None` for an empty response event.
 Terminate by setting `next_state=null` in `response` state.
 
 ## Migration (Breaking)

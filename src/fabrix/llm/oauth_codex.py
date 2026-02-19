@@ -58,6 +58,7 @@ class OAuthCodexStateProvider:
         self._instructions = instructions
         self._model = model
         self._reasoning_effort = reasoning_effort
+        self._output_schema_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
     def validate_tool_schemas(self, tool_schemas: list[dict[str, Any]]) -> None:
         if tool_schemas:
@@ -81,12 +82,15 @@ class OAuthCodexStateProvider:
         step: int,
         tool_schemas: list[dict[str, Any]],
     ) -> StateEnvelope:
-        prompt = self._build_prompt(
-            messages=messages,
-            history=history,
+        serialized_messages = self._serialize_messages(messages)
+        serialized_history_messages = self._serialize_history_messages(history)
+        developer_instructions = self._resolve_instructions()
+        prompt = self._build_prompt(has_tools=bool(tool_schemas))
+        control_message = self._build_control_message(
             current_state=current_state,
             step=step,
             tool_schemas=tool_schemas,
+            developer_instructions=developer_instructions,
         )
         output_schema = self._build_output_schema(
             current_state=current_state,
@@ -97,8 +101,9 @@ class OAuthCodexStateProvider:
             payload = await self._client.agenerate(
                 messages=self._build_model_messages(
                     prompt=prompt,
-                    messages=messages,
-                    history=history,
+                    input_messages=serialized_messages,
+                    history_messages=serialized_history_messages,
+                    control_message=control_message,
                 ),
                 model=self._model,
                 reasoning_effort=self._reasoning_effort,
@@ -133,6 +138,14 @@ class OAuthCodexStateProvider:
         current_state: NextState,
         tool_schemas: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        cache_key = (
+            current_state.value,
+            self._tool_schema_fingerprint(tool_schemas),
+        )
+        cached = self._output_schema_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
         state_schema = self._build_state_schema(
             current_state=current_state,
             tool_schemas=tool_schemas,
@@ -150,7 +163,12 @@ class OAuthCodexStateProvider:
                 },
             },
         }
-        return self._normalize_schema(output_schema)
+        normalized_output_schema = self._normalize_schema(output_schema)
+        self._output_schema_cache[cache_key] = copy.deepcopy(normalized_output_schema)
+        return copy.deepcopy(normalized_output_schema)
+
+    def _tool_schema_fingerprint(self, tool_schemas: list[dict[str, Any]]) -> str:
+        return self._json_dumps(tool_schemas, sort_keys=True)
 
     def _build_state_schema(
         self,
@@ -274,19 +292,10 @@ class OAuthCodexStateProvider:
 
         return "; ".join(rules)
 
-    def _build_prompt(
-        self,
-        *,
-        messages: list[TextMessage | ImageMessage],
-        history: list[dict[str, Any]],
-        current_state: NextState,
-        step: int,
-        tool_schemas: list[dict[str, Any]],
-    ) -> str:
-        instructions = self._resolve_instructions()
+    def _build_prompt(self, *, has_tools: bool) -> str:
         no_tools_line = (
             "No tools are registered. Avoid choosing next_state=tool_call.\n"
-            if not tool_schemas
+            if not has_tools
             else ""
         )
 
@@ -312,15 +321,8 @@ class OAuthCodexStateProvider:
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
             "- Prefer deeper reasoning for ambiguous or multi-constraint tasks; transition to tool_call/response only when the decision rationale and key trade-offs are explicit.\n"
             "- Infer user intent from input messages before choosing next_state.\n"
-            "\n"
-            f"Available tools JSON schema:\n{self._json_dumps(tool_schemas)}\n"
-            "\n"
-            "Developer instructions:\n"
-            f"{instructions}\n"
-            "\n"
-            f"Input messages JSON:\n{self._json_dumps(self._serialize_messages(messages))}\n"
-            "\n"
-            f"Execution history JSON:\n{self._json_dumps(history)}\n"
+            "- Runtime control context is provided in the final user message prefixed with `state_control:`.\n"
+            "- The `state_control` payload is authoritative for current_state, step, allowed transitions, tools, and developer instructions.\n"
         )
 
     def _resolve_instructions(self) -> str:
@@ -330,8 +332,14 @@ class OAuthCodexStateProvider:
         return resolved
 
     @classmethod
-    def _json_dumps(cls, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False, default=cls._json_default)
+    def _json_dumps(cls, value: Any, *, sort_keys: bool = False) -> str:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            default=cls._json_default,
+            separators=(",", ":"),
+            sort_keys=sort_keys,
+        )
 
     @staticmethod
     def _json_default(value: Any) -> Any:
@@ -351,14 +359,51 @@ class OAuthCodexStateProvider:
         self,
         *,
         prompt: str,
-        messages: list[TextMessage | ImageMessage],
-        history: list[dict[str, Any]],
+        input_messages: list[dict[str, Any]],
+        history_messages: list[dict[str, Any]],
+        control_message: dict[str, Any],
     ) -> list[dict[str, Any]]:
         return [
             {"role": "system", "content": prompt},
-            *self._serialize_messages(messages),
-            *self._serialize_history_messages(history),
+            *input_messages,
+            *history_messages,
+            control_message,
         ]
+
+    def _build_control_message(
+        self,
+        *,
+        current_state: NextState,
+        step: int,
+        tool_schemas: list[dict[str, Any]],
+        developer_instructions: str,
+    ) -> dict[str, Any]:
+        tool_names = [
+            name
+            for schema in tool_schemas
+            if isinstance(schema, dict)
+            for name in [schema.get("name")]
+            if isinstance(name, str) and name
+        ]
+        payload = {
+            "current_state": current_state.value,
+            "step": step,
+            "allowed_next_states": [
+                *[next_state.value for next_state in allowed_next_states(current_state)],
+                *(["null"] if current_state is NextState.response else []),
+            ],
+            "tool_names": tool_names,
+            "developer_instructions": developer_instructions,
+        }
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": f"state_control:{self._json_dumps(payload)}",
+                }
+            ],
+        }
 
     def _serialize_messages(self, messages: list[TextMessage | ImageMessage]) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
@@ -370,13 +415,188 @@ class OAuthCodexStateProvider:
 
     def _serialize_history_messages(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
-        for item in history:
-            if not isinstance(item, dict) or item.get("kind") != "tool_result":
+        for index, item in enumerate(history):
+            if not isinstance(item, dict):
+                serialized.append(self._serialize_unknown_history_item(item, index=index))
                 continue
-            message = self._serialize_tool_result_history(item)
-            if message is not None:
-                serialized.append(message)
+
+            kind = item.get("kind")
+            if kind == "reasoning":
+                serialized.append(self._serialize_reasoning_history(item))
+                continue
+
+            if kind == "tool_result":
+                message = self._serialize_tool_result_history(item)
+                if message is not None:
+                    serialized.append(message)
+                continue
+
+            if kind == "tool_call":
+                serialized.extend(self._serialize_tool_call_history(item))
+                continue
+
+            if kind == "response":
+                serialized.append(self._serialize_response_history(item))
+                continue
+
+            serialized.append(self._serialize_unknown_history_item(item, index=index))
         return serialized
+
+    def _serialize_reasoning_history(self, item: dict[str, Any]) -> dict[str, Any]:
+        step = item.get("step")
+        focus = item.get("focus")
+        next_state = item.get("next_state")
+        reasoning = item.get("reasoning")
+        summary = (
+            f"reasoning step={step} focus={focus or 'unknown'} "
+            f"next_state={next_state or 'unknown'}"
+        )
+        text = reasoning if isinstance(reasoning, str) and reasoning.strip() else ""
+        return {
+            "role": "assistant",
+            "content": f"{summary}\n{text}".strip(),
+        }
+
+    def _serialize_tool_call_history(self, item: dict[str, Any]) -> list[dict[str, Any]]:
+        step = item.get("step")
+        next_state = item.get("next_state")
+        tool_calls = item.get("tool_calls")
+        tool_results = item.get("tool_results")
+
+        call_count = len(tool_calls) if isinstance(tool_calls, list) else 0
+        result_count = len(tool_results) if isinstance(tool_results, list) else 0
+        parts: list[dict[str, str]] = [
+            {
+                "type": "input_text",
+                "text": (
+                    f"tool_call step={step} next_state={next_state or 'unknown'} "
+                    f"calls={call_count} results={result_count}"
+                ),
+            }
+        ]
+
+        if isinstance(tool_calls, list):
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    parts.append(
+                        {
+                            "type": "input_text",
+                            "text": f"planned_tool_call raw={self._json_dumps(call)}",
+                        }
+                    )
+                    continue
+                name = call.get("name")
+                call_id = call.get("call_id")
+                why = call.get("why")
+                arguments = call.get("arguments")
+                text = (
+                    f"planned_tool_call name={name or 'unknown'} "
+                    f"call_id={call_id or 'unknown'} arguments={self._json_dumps(arguments)}"
+                )
+                if isinstance(why, str) and why.strip():
+                    text = f"{text} why={why.strip()}"
+                parts.append({"type": "input_text", "text": text})
+
+        serialized: list[dict[str, Any]] = [{"role": "user", "content": parts}]
+        if isinstance(tool_results, list):
+            for result in tool_results:
+                if not isinstance(result, dict):
+                    serialized.append(
+                        self._history_text_message(
+                            f"tool_result raw={self._json_dumps(result)}"
+                        )
+                    )
+                    continue
+                message = self._serialize_tool_result_history(result)
+                if message is not None:
+                    serialized.append(message)
+        return serialized
+
+    def _serialize_response_history(self, item: dict[str, Any]) -> dict[str, Any]:
+        step = item.get("step")
+        next_state = item.get("next_state")
+        response = item.get("response")
+        raw_parts = item.get("parts")
+
+        content_parts: list[dict[str, str]] = []
+        if isinstance(response, str) and response:
+            content_parts.append({"type": "output_text", "text": response})
+
+        if isinstance(raw_parts, list):
+            for raw_part in raw_parts:
+                if not isinstance(raw_part, dict):
+                    content_parts.append(
+                        {"type": "output_text", "text": self._json_dumps(raw_part)}
+                    )
+                    continue
+
+                part_type = raw_part.get("type")
+                if part_type == "text":
+                    text = raw_part.get("text")
+                    if isinstance(text, str) and text:
+                        content_parts.append({"type": "output_text", "text": text})
+                    continue
+
+                if part_type == "json":
+                    content_parts.append(
+                        {
+                            "type": "output_text",
+                            "text": self._json_dumps(raw_part.get("data")),
+                        }
+                    )
+                    continue
+
+                if part_type == "image":
+                    caption = raw_part.get("caption")
+                    if isinstance(caption, str) and caption.strip():
+                        content_parts.append(
+                            {"type": "output_text", "text": caption.strip()}
+                        )
+                    image_url = raw_part.get("image_url")
+                    if isinstance(image_url, str) and image_url.strip():
+                        try:
+                            normalized_image_url = coerce_image_to_url(image_url.strip())
+                        except (FileNotFoundError, TypeError, ValueError) as exc:
+                            content_parts.append(
+                                {
+                                    "type": "output_text",
+                                    "text": f"[response image skipped: {exc}]",
+                                }
+                            )
+                        else:
+                            content_parts.append(
+                                {
+                                    "type": "input_image",
+                                    "image_url": normalized_image_url,
+                                }
+                            )
+                    continue
+
+                content_parts.append(
+                    {"type": "output_text", "text": self._json_dumps(raw_part)}
+                )
+
+        if not content_parts:
+            content_parts.append(
+                {
+                    "type": "output_text",
+                    "text": (
+                        f"response step={step} next_state={next_state} "
+                        "response=null parts=null"
+                    ),
+                }
+            )
+
+        return {"role": "assistant", "content": content_parts}
+
+    def _serialize_unknown_history_item(self, item: Any, *, index: int) -> dict[str, Any]:
+        return self._history_text_message(
+            f"history_item index={index} raw={self._json_dumps(item)}"
+        )
+
+    @staticmethod
+    def _history_text_message(text: str) -> dict[str, Any]:
+        return {"role": "user", "content": [{"type": "input_text", "text": text}]}
 
     def _serialize_tool_result_history(self, item: dict[str, Any]) -> dict[str, Any] | None:
         step = item.get("step")

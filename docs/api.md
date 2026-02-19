@@ -127,7 +127,9 @@ Runtime rules:
 - `ToolImagePart.image_url` accepts URL/path/bytes inputs.
 - `http(s)`/`data:` image values are preserved.
 - `file://`, local paths, and bytes are normalized to local absolute file references.
-- When tool history is serialized for model input, local image references are re-encoded to data URLs.
+- Tool-call argument strictness is guaranteed by `output_schema` with `strict_output=True`.
+- Prompt policy and runtime context are not duplicated; runtime control context is appended as a final control message.
+- When history is serialized for model input, reasoning/tool_call/response (and legacy `tool_result`) records are preserved, and local image references are re-encoded to data URLs.
 
 ## Event Reference
 

@@ -127,7 +127,9 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - Both sync and async tools are supported.
 - `ToolOutput.image(...)` keeps `http(s)`/`data:` values as-is.
 - `ToolOutput.image(...)` normalizes `file://`, local paths, and bytes to local absolute file references.
-- During LLM history serialization, local image references are re-normalized to data URLs.
+- Tool-call argument strictness is enforced by model `output_schema` with `strict_output=True`.
+- Prompt policy and runtime context are no longer duplicated; runtime control context is appended as a final control message.
+- During LLM history serialization, reasoning/tool_call/response (and legacy `tool_result`) records are preserved, and local image references are re-normalized to data URLs.
 
 ## Event Stream
 

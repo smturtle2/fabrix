@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 from fabrix.tools.output import ToolPart
 
+MAX_TOOL_CALLS_PER_STEP = 3
+
 
 class NextState(StrEnum):
     reasoning = "reasoning"
@@ -21,6 +23,7 @@ class BaseState(BaseModel):
     next_state: NextState = Field(
         description=(
             "Next node that the executor should transition to after this state. "
+            "To make better decisions, prefer additional reasoning iterations and choose next_state=reasoning multiple times before transitioning to tool_call or response. "
             "Set next_state=null only in response state to terminate after emitting the response event."
         )
     )
@@ -67,7 +70,8 @@ class ToolCallState(BaseState):
     )
     tool_calls: list[PlannedToolCall] = Field(
         min_length=1,
-        description="Ordered tool calls to execute in this step.",
+        max_length=MAX_TOOL_CALLS_PER_STEP,
+        description=f"Ordered tool calls to execute in this step (max {MAX_TOOL_CALLS_PER_STEP}).",
     )
 
 

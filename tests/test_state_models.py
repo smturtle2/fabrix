@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from fabrix.graph.state import (
+    MAX_TOOL_CALLS_PER_STEP,
     NextState,
     ReasoningState,
     ResponseState,
@@ -66,3 +67,14 @@ def test_reasoning_and_focus_allow_non_ascii() -> None:
     state = ReasoningState(next_state=NextState.response, reasoning="작업 중", focus="정리")
     assert state.reasoning == "작업 중"
     assert state.focus == "정리"
+
+
+def test_tool_call_state_rejects_too_many_tool_calls() -> None:
+    with pytest.raises(ValidationError):
+        ToolCallState(
+            next_state=NextState.response,
+            tool_calls=[
+                {"name": "x", "arguments": {}}
+                for _ in range(MAX_TOOL_CALLS_PER_STEP + 1)
+            ],
+        )

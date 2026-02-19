@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from fabrix.agent import Agent
 from fabrix.errors import LLMOutputError
-from fabrix.graph.state import NextState
+from fabrix.graph.state import MAX_TOOL_CALLS_PER_STEP, NextState
 from fabrix.graph.transitions import allowed_next_states
 from fabrix.llm.oauth_codex import OAuthCodexStateProvider
 from fabrix.messages import ImageMessage, TextMessage
@@ -88,6 +88,21 @@ def test_state_schema_preserves_pydantic_min_length_constraints(fake_client: Any
     assert any(item.get("type") == "null" for item in response_any_of if isinstance(item, dict))
     assert any(item.get("type") == "string" for item in response_any_of if isinstance(item, dict))
     assert "parts" in response_props
+
+
+def test_tool_call_schema_has_max_items_constraint(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    tool_schemas = ToolRegistry.from_callables([add_numbers]).schemas()
+
+    schema = provider._build_output_schema(
+        current_state=NextState.tool_call,
+        tool_schemas=tool_schemas,
+    )
+    tool_calls_schema = schema["json_schema"]["schema"]["properties"]["state"]["properties"][
+        "tool_calls"
+    ]
+    assert tool_calls_schema["minItems"] == 1
+    assert tool_calls_schema["maxItems"] == MAX_TOOL_CALLS_PER_STEP
 
 
 def test_response_schema_json_part_data_uses_scalar_anyof(fake_client: Any) -> None:

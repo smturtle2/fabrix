@@ -260,8 +260,10 @@ class OAuthCodexStateProvider:
     def _render_transition_rules(self) -> str:
         grouped_rules: dict[tuple[str, ...], list[str]] = {}
         for state in NextState:
-            allowed = "|".join(next_state.value for next_state in allowed_next_states(state))
-            grouped_rules.setdefault(tuple(allowed.split("|")), []).append(state.value)
+            allowed = [next_state.value for next_state in allowed_next_states(state)]
+            if state is NextState.response:
+                allowed.append("null")
+            grouped_rules.setdefault(tuple(allowed), []).append(state.value)
 
         rules: list[str] = []
         for allowed, from_states in grouped_rules.items():

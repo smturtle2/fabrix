@@ -269,7 +269,11 @@ def test_prompt_includes_full_transition_rules(fake_client: Any) -> None:
         tool_schemas=[],
     )
 
-    assert f"Transition rules: {provider._render_transition_rules()}." in prompt
+    shared_allowed = " | ".join(
+        next_state.value for next_state in allowed_next_states(NextState.reasoning)
+    )
+    assert f"{{ reasoning | tool_call }} -> {{ {shared_allowed} }}" in prompt
+    assert f"{{ response }} -> {{ {shared_allowed} | null }}" in prompt
 
 
 @pytest.mark.asyncio

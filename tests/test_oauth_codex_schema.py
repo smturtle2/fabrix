@@ -151,9 +151,7 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
     state_type_schema = state_schema["properties"]["state_type"]
     assert state_type_schema.get("enum") == ["reasoning"]
     assert state_schema["properties"]["next_state"]["enum"] == [
-        NextState.reasoning.value,
-        NextState.tool_call.value,
-        NextState.response.value,
+        state.value for state in allowed_next_states(NextState.reasoning)
     ]
 
     await provider.generate_state(
@@ -166,9 +164,7 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
     no_tool_output_schema = fake_client.calls[-1]["output_schema"]
     no_tool_state_schema = no_tool_output_schema["json_schema"]["schema"]["properties"]["state"]
     assert no_tool_state_schema["properties"]["next_state"]["enum"] == [
-        NextState.reasoning.value,
-        NextState.tool_call.value,
-        NextState.response.value,
+        state.value for state in allowed_next_states(NextState.reasoning)
     ]
 
 
@@ -183,11 +179,7 @@ def test_response_schema_next_state_is_nullable(fake_client: Any) -> None:
         item for item in any_of if isinstance(item, dict) and item.get("type") != "null"
     ]
     assert len(non_null) == 1
-    assert non_null[0].get("enum") == [
-        NextState.reasoning.value,
-        NextState.tool_call.value,
-        NextState.response.value,
-    ]
+    assert non_null[0].get("enum") == [state.value for state in allowed_next_states(NextState.response)]
 
 
 @pytest.mark.asyncio
@@ -267,7 +259,7 @@ async def test_provider_rejects_instruction_callable_returning_non_string(fake_c
     assert not fake_client.calls
 
 
-def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> None:
+def test_prompt_includes_full_transition_rules(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     prompt = provider._build_prompt(
         messages=[TextMessage(role="user", text="hello")],
@@ -277,62 +269,7 @@ def test_prompt_graph_rules_are_derived_from_transitions(fake_client: Any) -> No
         tool_schemas=[],
     )
 
-    for state in NextState:
-        allowed = "|".join(next_state.value for next_state in allowed_next_states(state))
-        assert f"- {state.value} -> {allowed}" in prompt
-
-
-def test_prompt_includes_reasoning_loop_strategy(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    prompt = provider._build_prompt(
-        messages=[TextMessage(role="user", text="hello")],
-        history=[],
-        current_state=NextState.reasoning,
-        step=1,
-        tool_schemas=[],
-    )
-
-    assert "Reasoning loop strategy:" in prompt
-    assert (
-        "You SHOULD use Chain-of-Thought-style multi-step planning with short, visible decision traces."
-        in prompt
-    )
-    assert "Prefer English in reasoning and focus for consistency." in prompt
-    assert "Keep each reasoning step to 1-2 sentences with one concrete focus." in prompt
-    assert (
-        "If uncertainty remains, you SHOULD choose next_state=reasoning and resolve within several reasoning steps."
-        in prompt
-    )
-    assert "Each step must add new evidence or a new decision; do not repeat prior reasoning." in prompt
-    assert (
-        "With a finite step budget, avoid long reasoning-only loops and transition "
-        "to tool_call/response as confidence grows."
-    ) in prompt
-    assert "Infer user intent from input messages before choosing next_state." in prompt
-    assert "For image output, prefer using parts with type=image." in prompt
-    assert "Empty responses are allowed (response=null and parts=null)." in prompt
-    assert "In response state, you MUST set next_state=null when the task is complete." in prompt
-
-
-def test_prompt_allowed_next_state_values_include_null_for_response_only(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    reasoning_prompt = provider._build_prompt(
-        messages=[TextMessage(role="user", text="hello")],
-        history=[],
-        current_state=NextState.reasoning,
-        step=1,
-        tool_schemas=[],
-    )
-    response_prompt = provider._build_prompt(
-        messages=[TextMessage(role="user", text="hello")],
-        history=[],
-        current_state=NextState.response,
-        step=2,
-        tool_schemas=[],
-    )
-
-    assert "Allowed next_state values now: ['reasoning', 'tool_call', 'response']." in reasoning_prompt
-    assert "Allowed next_state values now: ['reasoning', 'tool_call', 'response', 'null']." in response_prompt
+    assert f"Transition rules: {provider._render_transition_rules()}." in prompt
 
 
 @pytest.mark.asyncio

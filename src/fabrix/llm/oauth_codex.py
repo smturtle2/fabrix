@@ -176,7 +176,7 @@ class OAuthCodexStateProvider:
             raise LLMOutputError(f"state schema for `{current_state.value}` missing next_state")
         self._apply_next_state_values(
             schema=next_state_schema,
-            values=self._allowed_next_state_values(),
+            values=[state.value for state in allowed_next_states(current_state)],
         )
 
         if current_state is NextState.tool_call:
@@ -240,17 +240,6 @@ class OAuthCodexStateProvider:
 
         return self._normalize_schema(strict_schema)
 
-    @staticmethod
-    def _allowed_next_state_values() -> list[str]:
-        return [state.value for state in NextState]
-
-    @staticmethod
-    def _prompt_allowed_next_state_values(*, current_state: NextState) -> list[str]:
-        allowed = [state.value for state in NextState]
-        if current_state is NextState.response:
-            return [*allowed, "null"]
-        return allowed
-
     def _apply_next_state_values(self, *, schema: dict[str, Any], values: list[str]) -> None:
         if "enum" in schema:
             schema["enum"] = values
@@ -268,12 +257,19 @@ class OAuthCodexStateProvider:
 
         raise LLMOutputError("state schema next_state must define enum or anyOf")
 
-    def _render_graph_rules(self) -> str:
-        lines: list[str] = []
+    def _render_transition_rules(self) -> str:
+        grouped_rules: dict[tuple[str, ...], list[str]] = {}
         for state in NextState:
             allowed = "|".join(next_state.value for next_state in allowed_next_states(state))
-            lines.append(f"- {state.value} -> {allowed}")
-        return "\n".join(lines)
+            grouped_rules.setdefault(tuple(allowed.split("|")), []).append(state.value)
+
+        rules: list[str] = []
+        for allowed, from_states in grouped_rules.items():
+            rules.append(
+                f"{{ {' | '.join(from_states)} }} -> {{ {' | '.join(allowed)} }}"
+            )
+
+        return "; ".join(rules)
 
     def _build_prompt(
         self,
@@ -285,7 +281,6 @@ class OAuthCodexStateProvider:
         tool_schemas: list[dict[str, Any]],
     ) -> str:
         instructions = self._resolve_instructions()
-        allowed = self._prompt_allowed_next_state_values(current_state=current_state)
         no_tools_line = (
             "No tools are registered. Avoid choosing next_state=tool_call.\n"
             if not tool_schemas
@@ -295,10 +290,7 @@ class OAuthCodexStateProvider:
         return (
             "You are Fabrix, a graph-based agent state generator.\n"
             "Return ONLY a JSON object matching the provided schema.\n"
-            f"Current node/state_type MUST be `{current_state.value}`.\n"
-            f"Allowed next_state values now: {allowed}.\n"
-            "Graph rules:\n"
-            f"{self._render_graph_rules()}\n"
+            f"Transition rules: {self._render_transition_rules()}.\n"
             "Tool usage rules:\n"
             "- You MUST choose tool_call state only when external computation/data access is required.\n"
             "- In tool_call state, each arguments object must exactly match selected tool schema.\n"
@@ -313,18 +305,19 @@ class OAuthCodexStateProvider:
             "- You SHOULD use Chain-of-Thought-style multi-step planning with short, visible decision traces.\n"
             "- Prefer English in reasoning and focus for consistency.\n"
             "- Keep each reasoning step to 1-2 sentences with one concrete focus.\n"
-            "- If uncertainty remains, you SHOULD choose next_state=reasoning and resolve within several reasoning steps.\n"
+            "- If uncertainty remains, you SHOULD choose next_state=reasoning and continue for additional steps until major uncertainties are resolved.\n"
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
-            "- With a finite step budget, avoid long reasoning-only loops and transition to tool_call/response as confidence grows.\n"
+            "- Prefer deeper reasoning for ambiguous or multi-constraint tasks; transition to tool_call/response only when confidence is well-grounded.\n"
             "- Infer user intent from input messages before choosing next_state.\n"
+            "\n"
+            f"Available tools JSON schema:\n{self._json_dumps(tool_schemas)}\n"
             "\n"
             "Developer instructions:\n"
             f"{instructions}\n"
             "\n"
-            f"Step: {step}\n"
-            f"Input messages JSON: {self._json_dumps(self._serialize_messages(messages))}\n"
-            f"Available tools JSON schema: {self._json_dumps(tool_schemas)}\n"
-            f"Execution history JSON: {self._json_dumps(history)}\n"
+            f"Input messages JSON:\n{self._json_dumps(self._serialize_messages(messages))}\n"
+            "\n"
+            f"Execution history JSON:\n{self._json_dumps(history)}\n"
         )
 
     def _resolve_instructions(self) -> str:

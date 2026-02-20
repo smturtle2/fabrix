@@ -23,8 +23,8 @@ class BaseState(BaseModel):
     next_state: NextState = Field(
         description=(
             "Next node that the executor should transition to after this state. "
-            "To make better decisions, prefer additional reasoning iterations and choose next_state=reasoning multiple times before transitioning to tool_call or response. "
-            "Set next_state=null only in response state to terminate after emitting the response event."
+            "To make better decisions, prefer additional reasoning iterations and choose `next_state=reasoning` multiple times before transitioning to `tool_call` or `response`. "
+            "Set `next_state=null` only in `response` state to terminate after emitting the response event."
         )
     )
 
@@ -59,7 +59,11 @@ class ReasoningState(BaseState):
     )
     focus: str = Field(
         min_length=1,
-        description="Short, concrete objective for this current step. Prefer English text.",
+        description=(
+            "Short, concrete objective for what the next step should focus on. "
+            "Keep it consistent with `next_state` (continue reasoning vs transition). "
+            "Prefer English text."
+        ),
     )
 
 
@@ -83,7 +87,7 @@ class ResponseState(BaseState):
     next_state: NextState | None = Field(
         description=(
             "Next node that the executor should transition to after this response. "
-            "You must set next_state to null to terminate immediately after emitting this response event."
+            "You must set `next_state` to `null` to terminate immediately after emitting this response event."
         )
     )
     response: str | None = Field(

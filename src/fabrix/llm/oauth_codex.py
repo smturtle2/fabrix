@@ -294,35 +294,39 @@ class OAuthCodexStateProvider:
 
     def _build_prompt(self, *, has_tools: bool) -> str:
         no_tools_line = (
-            "No tools are registered. Avoid choosing next_state=tool_call.\n"
+            "No tools are registered. Avoid choosing `next_state=tool_call`.\n"
             if not has_tools
             else ""
         )
 
         return (
-            "You are Fabrix, a graph-based agent state generator.\n"
+            "You are a graph-based agent state generator.\n"
             "Return ONLY a JSON object matching the provided schema.\n"
             f"Transition rules: {self._render_transition_rules()}.\n"
+            "Decision policy:\n"
+            "- Infer user intent, constraints, and missing information from input messages and history before selecting `next_state`.\n"
+            "- Runtime control context is provided in the final user message prefixed with `state_control:`.\n"
+            "- The `state_control` payload is authoritative for `current_state`, `step`, allowed transitions, tools, and developer instructions.\n"
             "Tool usage rules:\n"
-            "- You MUST choose tool_call state only when external computation/data access is required.\n"
-            "- In tool_call state, each arguments object must exactly match selected tool schema.\n"
-            f"- In tool_call state, include between 1 and {MAX_TOOL_CALLS_PER_STEP} tool_calls.\n"
+            "- You MUST choose `tool_call` state only when external computation/data access is required.\n"
+            "- In `tool_call` state, each `arguments` object must exactly match the selected tool schema.\n"
+            f"- In `tool_call` state, include between 1 and {MAX_TOOL_CALLS_PER_STEP} `tool_calls`.\n"
             f"{no_tools_line}"
             "Response rules:\n"
-            "- response state may emit plain text (response), structured parts, both, or neither.\n"
-            "- For image output, prefer using parts with type=image.\n"
-            "- Empty responses are allowed (response=null and parts=null).\n"
-            "- In response state, you MUST set next_state=null when the task is complete.\n"
+            "- `response` state may emit plain text (`response`), structured parts, both, or neither.\n"
+            "- For image output, prefer using `parts` with `type=image`.\n"
+            "- Empty responses are allowed (`response=null` and `parts=null`).\n"
+            "- In `response` state, you MUST set `next_state=null` when the task is complete.\n"
             "Reasoning loop strategy:\n"
-            "- You SHOULD use Chain-of-Thought-style multi-step planning with short, visible decision traces.\n"
-            "- Prefer English in reasoning and focus for consistency.\n"
-            "- Keep each reasoning step to 1-2 sentences with one concrete focus.\n"
-            "- To make better decisions, you SHOULD choose next_state=reasoning for additional iterations to validate assumptions, compare options, and improve decision quality before transitioning.\n"
+            "- Treat `reasoning` as a planning loop, not free-form commentary.\n"
+            "- In every `reasoning` step, you MUST first define or refine a short plan before making the decision.\n"
+            "- Use `reasoning` to record the decision trace, and use `focus` to state what the next step should concentrate on.\n"
+            "- `focus` and `next_state` MUST be aligned: if `next_state=reasoning`, `focus` should describe the next validation/comparison/planning objective; if transitioning, `focus` should describe the immediate tool-execution or response objective.\n"
+            "- Prefer English in `reasoning` and `focus` for consistency.\n"
+            "- Keep each reasoning step to 1-2 sentences with one concrete `focus`.\n"
+            "- To make better decisions, when assumption validation, option comparison, or plan revision is needed, use `next_state=reasoning` and continue additional iterations before transitioning.\n"
             "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
-            "- Prefer deeper reasoning for ambiguous or multi-constraint tasks; transition to tool_call/response only when the decision rationale and key trade-offs are explicit.\n"
-            "- Infer user intent from input messages before choosing next_state.\n"
-            "- Runtime control context is provided in the final user message prefixed with `state_control:`.\n"
-            "- The `state_control` payload is authoritative for current_state, step, allowed transitions, tools, and developer instructions.\n"
+            "- Prefer deeper reasoning for ambiguous or multi-constraint tasks; transition to `tool_call`/`response` only when the plan rationale and key trade-offs are explicit.\n"
         )
 
     def _resolve_instructions(self) -> str:

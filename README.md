@@ -140,7 +140,7 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `response`
 - `task_failed`
 
-`reasoning` is a step-level decision trace / plan summary, not raw internal chain-of-thought.
+`reasoning` is a step-level decision trace summary, not raw internal chain-of-thought.
 `response` events now support both `response: str | None` and `parts` (structured text/image/json parts);
 both fields may be `None` for an empty response event.
 Terminate by setting `next_state=null` in `response` state.
@@ -171,10 +171,12 @@ Tool migration:
 
 ## Examples
 
+- Examples guide: [`examples/README.md`](examples/README.md)
 - Minimal quickstart: [`examples/minimal/quickstart.py`](examples/minimal/quickstart.py)
 - Multimodal vision: [`examples/minimal/multimodal.py`](examples/minimal/multimodal.py)
 - Data workflow: [`examples/advanced/data_workflow.py`](examples/advanced/data_workflow.py)
 - Incident response workflow: [`examples/advanced/incident_response.py`](examples/advanced/incident_response.py)
+- Complex reasoning workflow: [`examples/advanced/complex_reasoning_workflow.py`](examples/advanced/complex_reasoning_workflow.py)
 
 ## Notes
 

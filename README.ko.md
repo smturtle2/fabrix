@@ -140,7 +140,7 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `response`
 - `task_failed`
 
-`reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace / plan summary입니다.
+`reasoning`은 내부 Chain-of-Thought 원문이 아니라 단계별 decision trace summary입니다.
 `response` 이벤트는 `response: str | None`과 구조화된 `parts`(text/image/json)를 모두 지원하며,
 두 필드가 모두 `None`인 빈 응답 이벤트도 허용됩니다.
 종료하려면 `response` 상태에서 `next_state=null`을 설정하면 됩니다.
@@ -171,10 +171,12 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 
 ## 예제
 
+- 예제 가이드: [`examples/README.md`](examples/README.md)
 - Minimal quickstart: [`examples/minimal/quickstart.py`](examples/minimal/quickstart.py)
 - 멀티모달 비전: [`examples/minimal/multimodal.py`](examples/minimal/multimodal.py)
 - Data workflow: [`examples/advanced/data_workflow.py`](examples/advanced/data_workflow.py)
 - Incident response workflow: [`examples/advanced/incident_response.py`](examples/advanced/incident_response.py)
+- Complex reasoning workflow: [`examples/advanced/complex_reasoning_workflow.py`](examples/advanced/complex_reasoning_workflow.py)
 
 ## 참고 사항
 

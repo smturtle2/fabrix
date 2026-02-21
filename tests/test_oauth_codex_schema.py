@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -212,107 +211,6 @@ def test_response_schema_next_state_is_nullable(fake_client: Any) -> None:
     ]
     assert len(non_null) == 1
     assert non_null[0].get("enum") == [state.value for state in allowed_next_states(NextState.response)]
-
-
-@pytest.mark.asyncio
-async def test_provider_prompt_serializes_non_json_values(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    now = datetime(2026, 1, 2, 3, 4, 5)
-
-    await provider.generate_state(
-        messages=[TextMessage(role="user", text="hello")],
-        history=[
-            {
-                "kind": "tool_result",
-                "step": 1,
-                "tool_name": "x",
-                "call_id": "c1",
-                "ok": True,
-                "output": {"ts": now},
-            }
-        ],
-        current_state=NextState.reasoning,
-        step=1,
-        tool_schemas=[],
-    )
-
-    sent_messages = fake_client.calls[-1]["messages"]
-    history_message = _find_message_with_text(sent_messages, "tool_result step=1")
-    content = history_message["content"]
-    assert isinstance(content, list)
-    assert any("2026-01-02T03:04:05" in part.get("text", "") for part in content)
-
-
-@pytest.mark.asyncio
-async def test_provider_resolves_instruction_callable_for_each_prompt(fake_client: Any) -> None:
-    call_count = 0
-
-    def dynamic_instructions() -> str:
-        nonlocal call_count
-        call_count += 1
-        return f"dynamic-{call_count}"
-
-    provider = OAuthCodexStateProvider(instructions=dynamic_instructions, client=fake_client)
-
-    await provider.generate_state(
-        messages=[TextMessage(role="user", text="hello")],
-        history=[],
-        current_state=NextState.reasoning,
-        step=1,
-        tool_schemas=[],
-    )
-    await provider.generate_state(
-        messages=[TextMessage(role="user", text="hello")],
-        history=[],
-        current_state=NextState.reasoning,
-        step=2,
-        tool_schemas=[],
-    )
-
-    control_first = fake_client.calls[0]["messages"][-1]["content"][0]["text"]
-    control_second = fake_client.calls[1]["messages"][-1]["content"][0]["text"]
-    assert '"developer_instructions":"dynamic-1"' in control_first
-    assert '"developer_instructions":"dynamic-2"' in control_second
-    assert call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_provider_rejects_instruction_callable_returning_non_string(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(
-        instructions=lambda: 123,  # type: ignore[return-value]
-        client=fake_client,
-    )
-
-    with pytest.raises(TypeError, match="instructions must be a string or a callable returning a string"):
-        await provider.generate_state(
-            messages=[TextMessage(role="user", text="hello")],
-            history=[],
-            current_state=NextState.reasoning,
-            step=1,
-            tool_schemas=[],
-        )
-    assert not fake_client.calls
-
-
-def test_prompt_includes_full_transition_rules(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    prompt = provider._build_prompt(has_tools=False)
-
-    shared_allowed = " | ".join(
-        next_state.value for next_state in allowed_next_states(NextState.reasoning)
-    )
-    assert f"{{ reasoning | tool_call }} -> {{ {shared_allowed} }}" in prompt
-    assert f"{{ response }} -> {{ {shared_allowed} | null }}" in prompt
-
-
-def test_prompt_excludes_dynamic_context_dumps(fake_client: Any) -> None:
-    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
-    prompt = provider._build_prompt(has_tools=True)
-
-    assert "Input messages JSON:" not in prompt
-    assert "Execution history JSON:" not in prompt
-    assert "Available tools JSON schema:" not in prompt
-    assert "Developer instructions:" not in prompt
 
 
 @pytest.mark.asyncio

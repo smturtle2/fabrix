@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
 
+EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
+if str(EXAMPLES_ROOT) not in sys.path:
+    sys.path.insert(0, str(EXAMPLES_ROOT))
+
+from common import run_case
 from fabrix import Agent
-from fabrix.events import (
-    AgentEvent,
-    ReasoningEvent,
-    ResponseEvent,
-    TaskFailedEvent,
-    ToolEvent,
-)
 from fabrix.messages import ImageMessage, TextMessage
 
 PYTHON_LOGO_URL = "https://raw.githubusercontent.com/github/explore/main/topics/python/python.png"
@@ -35,31 +34,8 @@ def _load_image_bytes(url: str) -> bytes:
         return base64.b64decode(_FALLBACK_PNG_BASE64)
 
 
-def _print_event(event: AgentEvent) -> None:
-    print(f"[step={event.step}] {event.event_type}")
-    if isinstance(event, ReasoningEvent):
-        print("reasoning:", event.reasoning)
-        print("focus:", event.focus)
-    elif isinstance(event, ToolEvent):
-        if event.phase == "start":
-            print("tool call:", event.tool_name, event.arguments)
-        elif event.result is not None:
-            print("tool result:", event.result.model_dump())
-    elif isinstance(event, ResponseEvent):
-        if event.response is not None:
-            print("response:", event.response)
-        if event.parts is not None:
-            print("parts:", [part.model_dump(mode="json") for part in event.parts])
-        if event.response is None and event.parts is None:
-            print("response: <empty>")
-    elif isinstance(event, TaskFailedEvent):
-        print("failed:", event.error_code, event.message)
-
-
 async def _run_case(agent: Agent, title: str, messages: list[TextMessage | ImageMessage]) -> None:
-    print(f"\n=== {title} ===")
-    async for event in agent.run_stream(messages=messages):
-        _print_event(event)
+    await run_case(agent, title=title, messages=messages)
 
 
 async def main() -> None:

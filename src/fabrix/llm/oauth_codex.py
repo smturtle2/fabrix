@@ -52,7 +52,7 @@ class OAuthCodexStateProvider:
         instructions: str | Callable[[], str],
         client: OAuthCodexClient | None = None,
         model: str = DEFAULT_MODEL,
-        reasoning_effort: ReasoningEffort = "medium",
+        reasoning_effort: ReasoningEffort = "low",
     ) -> None:
         self._client = client or OAuthCodexClient()
         self._instructions = instructions
@@ -318,15 +318,15 @@ class OAuthCodexStateProvider:
             "- Empty responses are allowed (`response=null` and `parts=null`).\n"
             "- In `response` state, you MUST set `next_state=null` when the task is complete.\n"
             "Reasoning loop strategy:\n"
-            "- Treat `reasoning` as a planning loop, not free-form commentary.\n"
-            "- In every `reasoning` step, you MUST first define or refine a short plan before making the decision.\n"
-            "- Use `reasoning` to record the decision trace, and use `focus` to state what the next step should concentrate on.\n"
-            "- `focus` and `next_state` MUST be aligned: if `next_state=reasoning`, `focus` should describe the next validation/comparison/planning objective; if transitioning, `focus` should describe the immediate tool-execution or response objective.\n"
-            "- Prefer English in `reasoning` and `focus` for consistency.\n"
-            "- Keep each reasoning step to 1-2 sentences with one concrete `focus`.\n"
-            "- To make better decisions, when assumption validation, option comparison, or plan revision is needed, use `next_state=reasoning` and continue additional iterations before transitioning.\n"
-            "- Each step must add new evidence or a new decision; do not repeat prior reasoning.\n"
-            "- Prefer deeper reasoning for ambiguous or multi-constraint tasks; transition to `tool_call`/`response` only when the plan rationale and key trade-offs are explicit.\n"
+            "- Treat `reasoning` as a short decision journal, not free-form commentary.\n"
+            "- Use `reasoning` to record what changed in this step (new evidence or decision delta), and use `focus` to define the immediate next check/action.\n"
+            "- `focus` and `next_state` MUST be aligned: with `next_state=reasoning`, `focus` should be the next question/validation target; when transitioning, `focus` should be the immediate execution objective.\n"
+            "- Prefer English in `reasoning` and `focus` for consistency; keep each reasoning step to 1-2 sentences.\n"
+            "- Consider a task non-trivial when it involves multiple tools, competing constraints/objectives, ranking, or scenario comparison.\n"
+            "- For non-trivial tasks, do not transition on the same reasoning step where you first form a candidate decision; use the next reasoning step as a brief challenge pass.\n"
+            "- End reasoning only when you can state a concrete transition reason in `reasoning` (enough evidence, clear next executable action, and acceptable residual uncertainty).\n"
+            "- If that challenge pass invalidates the transition reason, continue reasoning and refine the decision basis; if not, you may transition.\n"
+            "- Transition to `tool_call`/`response` only after that reason is explicit.\n"
         )
 
     def _resolve_instructions(self) -> str:

@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
+if str(EXAMPLES_ROOT) not in sys.path:
+    sys.path.insert(0, str(EXAMPLES_ROOT))
+
+from common import run_case
 from fabrix import Agent
-from fabrix.events import (
-    ReasoningEvent,
-    ResponseEvent,
-    TaskFailedEvent,
-    ToolEvent,
-)
 from fabrix.messages import TextMessage
 from fabrix.tools import ToolOutput
 
@@ -273,30 +274,7 @@ async def main() -> None:
             ),
         )
     ]
-
-    async for event in agent.run_stream(messages=messages):
-        if isinstance(event, ReasoningEvent):
-            print(f"[step={event.step}] reasoning={event.reasoning}")
-            print(f"[step={event.step}] focus={event.focus} next={event.next_state}")
-        elif isinstance(event, ToolEvent):
-            if event.phase == "start":
-                print(f"[step={event.step}] tool_call={event.tool_name} args={event.arguments}")
-            elif event.result is not None:
-                print(f"[step={event.step}] tool={event.tool_name} ok={event.result.ok}")
-                if event.result.error:
-                    print(f"[step={event.step}] tool_error={event.result.error}")
-        elif isinstance(event, ResponseEvent):
-            if event.response is not None:
-                print(f"[step={event.step}] response={event.response}")
-            if event.parts is not None:
-                print(
-                    f"[step={event.step}] parts="
-                    f"{[part.model_dump(mode='json') for part in event.parts]}"
-                )
-            if event.response is None and event.parts is None:
-                print(f"[step={event.step}] response=<empty>")
-        elif isinstance(event, TaskFailedEvent):
-            print("failed:", event.error_code, event.message)
+    await run_case(agent, messages=messages)
 
 
 if __name__ == "__main__":

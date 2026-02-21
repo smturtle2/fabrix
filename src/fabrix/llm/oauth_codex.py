@@ -52,7 +52,7 @@ class OAuthCodexStateProvider:
         instructions: str | Callable[[], str],
         client: OAuthCodexClient | None = None,
         model: str = DEFAULT_MODEL,
-        reasoning_effort: ReasoningEffort = "low",
+        reasoning_effort: ReasoningEffort = "medium",
     ) -> None:
         self._client = client or OAuthCodexClient()
         self._instructions = instructions

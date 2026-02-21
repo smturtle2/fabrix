@@ -124,7 +124,7 @@ async def test_provider_uses_low_reasoning_effort_by_default(fake_client: Any) -
         tool_schemas=[],
     )
 
-    assert fake_client.calls[-1]["reasoning_effort"] == "low"
+    assert fake_client.calls[-1]["reasoning_effort"] == "medium"
 
 
 def test_prompt_includes_full_transition_rules(fake_client: Any) -> None:

@@ -172,7 +172,7 @@ def test_prompt_includes_full_transition_rules(fake_client: Any) -> None:
         "Input messages JSON:",
         "Execution history JSON:",
         "Available tools JSON schema:",
-        "Developer instructions:",
+        "Instructions:",
     ],
 )
 def test_prompt_excludes_dynamic_context_dumps(fake_client: Any, marker: str) -> None:
@@ -193,3 +193,34 @@ def test_prompt_reasoning_strategy_avoids_rigid_plan_prefixes(fake_client: Any) 
     ]
     for fragment in required_fragments:
         assert fragment in prompt
+
+
+def test_prompt_frames_autonomous_agent_identity(fake_client: Any) -> None:
+    prompt = _build_prompt(fake_client, has_tools=True)
+    required_fragments = [
+        "You are an autonomous agent operating on a graph state machine.",
+        "Act with bounded autonomy and a consistent personality",
+        "instructions section in this system message",
+    ]
+    for fragment in required_fragments:
+        assert fragment in prompt
+
+
+@pytest.mark.asyncio
+async def test_system_message_includes_instructions_and_runtime_context(
+    fake_client: Any,
+) -> None:
+    provider = OAuthCodexStateProvider(instructions="policy", client=fake_client)
+
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+
+    system_message = fake_client.calls[-1]["messages"][0]["content"]
+    assert isinstance(system_message, str)
+    assert "Use the runtime context and instructions below as primary directives." in system_message
+    assert "Instructions:\npolicy" in system_message

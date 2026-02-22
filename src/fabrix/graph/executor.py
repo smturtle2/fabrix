@@ -17,7 +17,7 @@ from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools.registry import ToolRegistry
 from fabrix.tools.runtime import ToolExecutionResult, execute_tool
 
-_DEFAULT_LLM_RETRY_ATTEMPTS = 2
+_DEFAULT_LLM_RETRY_ATTEMPTS = 4
 
 
 class GraphExecutor:

@@ -97,14 +97,15 @@ class OAuthCodexStateProvider:
             current_state=current_state,
             tool_schemas=tool_schemas,
         )
+        model_messages = self._build_model_messages(
+            system_message=system_message,
+            input_messages=serialized_messages,
+            history_messages=serialized_history_messages,
+        )
 
         try:
             payload = await self._client.agenerate(
-                messages=self._build_model_messages(
-                    system_message=system_message,
-                    input_messages=serialized_messages,
-                    history_messages=serialized_history_messages,
-                ),
+                messages=model_messages,
                 model=self._model,
                 reasoning_effort=self._reasoning_effort,
                 output_schema=output_schema,
@@ -119,18 +120,73 @@ class OAuthCodexStateProvider:
 
     def _parse_payload(self, payload: str | dict[str, Any]) -> StateEnvelope:
         if isinstance(payload, str):
-            try:
-                data = json.loads(payload)
-            except json.JSONDecodeError as exc:
-                raise RetryableLLMOutputError(
-                    "model returned non-JSON text for structured state"
-                ) from exc
+            data = self._parse_payload_text(payload)
         else:
             data = payload
         try:
             return StateEnvelope.model_validate(data)
         except ValidationError as exc:
             raise RetryableLLMOutputError(f"state envelope validation failed: {exc}") from exc
+
+    def _parse_payload_text(self, payload: str) -> dict[str, Any]:
+        candidates = [payload.strip()]
+        fenced = self._extract_markdown_fence_payload(payload)
+        if fenced is not None:
+            candidates.append(fenced)
+
+        for candidate in candidates:
+            parsed = self._try_parse_json_object(candidate)
+            if parsed is not None:
+                return parsed
+
+        parsed = self._extract_first_json_object(payload)
+        if parsed is not None:
+            return parsed
+
+        raise RetryableLLMOutputError(
+            "model returned non-JSON text for structured state"
+        )
+
+    @staticmethod
+    def _extract_markdown_fence_payload(payload: str) -> str | None:
+        stripped = payload.strip()
+        if not stripped.startswith("```"):
+            return None
+
+        lines = stripped.splitlines()
+        if len(lines) < 3:
+            return None
+        if not lines[0].startswith("```"):
+            return None
+        if lines[-1].strip() != "```":
+            return None
+
+        body = "\n".join(lines[1:-1]).strip()
+        return body or None
+
+    @staticmethod
+    def _try_parse_json_object(payload: str) -> dict[str, Any] | None:
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+        return None
+
+    @staticmethod
+    def _extract_first_json_object(payload: str) -> dict[str, Any] | None:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(payload):
+            if char != "{":
+                continue
+            try:
+                parsed, _ = decoder.raw_decode(payload[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
 
     def _build_output_schema(
         self,
@@ -302,6 +358,11 @@ class OAuthCodexStateProvider:
         return (
             "You are a graph-based agent state generator.\n"
             "Return ONLY a JSON object matching the provided schema.\n"
+            "JSON output contract:\n"
+            "- Output must be exactly one JSON object and nothing else.\n"
+            "- Do not use markdown fences, prefixes, or suffixes.\n"
+            "- Do not emit prose explanations before or after JSON.\n"
+            "- If uncertain, still emit the best valid JSON object that satisfies the schema.\n"
             f"Transition rules: {self._render_transition_rules()}.\n"
             "Decision policy:\n"
             "- Infer user intent, constraints, and missing information from input messages and history before selecting `next_state`.\n"

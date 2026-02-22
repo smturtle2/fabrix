@@ -65,6 +65,21 @@ def _find_message_with_text(messages: list[dict[str, Any]], needle: str) -> dict
     raise AssertionError(f"message containing `{needle}` not found")
 
 
+class _LooseJSONStringClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def agenerate(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return (
+            "Here is the result.\n"
+            "```json\n"
+            '{"state":{"state_type":"reasoning","next_state":"response","reasoning":"done","focus":"finalize"}}\n'
+            "```\n"
+            "Use it."
+        )
+
+
 def test_tool_call_items_use_anyof_and_name_arguments_only(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     tool_schemas = ToolRegistry.from_callables([add_numbers]).schemas()
@@ -159,6 +174,28 @@ def test_output_schema_has_no_unsupported_keywords_for_all_states(fake_client: A
         else:
             schema = provider._build_output_schema(current_state=state, tool_schemas=[])
         _assert_no_keywords(schema, forbidden)
+
+
+@pytest.mark.asyncio
+async def test_provider_parses_fenced_json_from_string_payload() -> None:
+    client = _LooseJSONStringClient()
+    provider = OAuthCodexStateProvider(instructions="x", client=client)
+
+    envelope = await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+
+    assert len(client.calls) == 1
+    assert client.calls[0]["output_schema"] is not None
+    assert client.calls[0]["strict_output"] is True
+    assert envelope.state.state_type == "reasoning"
+    assert envelope.state.next_state == NextState.response
+    assert envelope.state.reasoning == "done"
+    assert envelope.state.focus == "finalize"
 
 
 @pytest.mark.asyncio

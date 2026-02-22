@@ -594,4 +594,4 @@ async def test_retryable_llm_errors_fail_after_retries(monkeypatch: pytest.Monke
     assert isinstance(events[-1], TaskFailedEvent)
     assert events[-1].error_code == "llm_error"
     assert "retry attempts exhausted" in events[-1].message
-    assert call_count == 3
+    assert call_count == 5

@@ -128,7 +128,7 @@ Runtime rules:
 - `http(s)`/`data:` image values are preserved.
 - `file://`, local paths, and bytes are normalized to local absolute file references.
 - Tool-call argument strictness is guaranteed by `output_schema` with `strict_output=True`.
-- Prompt policy and runtime context are not duplicated; runtime control context is appended as a final control message.
+- Runtime context is embedded in the system message, and transition/tool constraints are enforced by schema validation.
 - When history is serialized for model input, reasoning/tool_call/response (and legacy `tool_result`) records are preserved, and local image references are re-encoded to data URLs.
 
 ## Event Reference

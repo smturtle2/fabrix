@@ -235,16 +235,14 @@ async def test_provider_passes_messages_to_client_in_order(fake_client: Any) -> 
     )
 
     sent_messages = fake_client.calls[-1]["messages"]
-    assert [item["role"] for item in sent_messages[1:5]] == ["user", "user", "user", "user"]
+    assert sent_messages[0]["role"] == "system"
+    assert isinstance(sent_messages[0]["content"], str)
+    assert [item["role"] for item in sent_messages[1:4]] == ["user", "user", "user"]
     assert sent_messages[1]["content"] == "Describe this image"
     content = sent_messages[2]["content"]
     assert isinstance(content, list)
     assert [part["type"] for part in content] == ["input_text", "input_image"]
     assert sent_messages[3]["content"] == "Focus on warnings"
-    control_content = sent_messages[4]["content"]
-    assert isinstance(control_content, list)
-    assert control_content[0]["type"] == "input_text"
-    assert control_content[0]["text"].startswith("state_control:")
 
 
 @pytest.mark.asyncio

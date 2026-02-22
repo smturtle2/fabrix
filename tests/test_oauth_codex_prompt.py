@@ -87,11 +87,40 @@ async def test_provider_resolves_instruction_callable_for_each_prompt(fake_clien
         tool_schemas=[],
     )
 
-    control_first = fake_client.calls[0]["messages"][-1]["content"][0]["text"]
-    control_second = fake_client.calls[1]["messages"][-1]["content"][0]["text"]
-    assert '"developer_instructions":"dynamic-1"' in control_first
-    assert '"developer_instructions":"dynamic-2"' in control_second
+    system_first = fake_client.calls[0]["messages"][0]["content"]
+    system_second = fake_client.calls[1]["messages"][0]["content"]
+    assert isinstance(system_first, str)
+    assert isinstance(system_second, str)
+    assert "dynamic-1" in system_first
+    assert "dynamic-2" in system_second
     assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_does_not_send_state_control_message(fake_client: Any) -> None:
+    provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+
+    sent_messages = fake_client.calls[-1]["messages"]
+    for message in sent_messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            assert "state_control:" not in content
+            continue
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if isinstance(text, str):
+                assert "state_control:" not in text
 
 
 @pytest.mark.asyncio

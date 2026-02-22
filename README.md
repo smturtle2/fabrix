@@ -128,7 +128,7 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `ToolOutput.image(...)` keeps `http(s)`/`data:` values as-is.
 - `ToolOutput.image(...)` normalizes `file://`, local paths, and bytes to local absolute file references.
 - Tool-call argument strictness is enforced by model `output_schema` with `strict_output=True`.
-- Prompt policy and runtime context are no longer duplicated; runtime control context is appended as a final control message.
+- Runtime context is embedded in the system message, and transition/tool constraints are enforced by schema validation.
 - During LLM history serialization, reasoning/tool_call/response (and legacy `tool_result`) records are preserved, and local image references are re-normalized to data URLs.
 
 ## Event Stream

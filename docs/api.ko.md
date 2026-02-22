@@ -128,7 +128,7 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `http(s)`/`data:` 값은 그대로 유지됩니다.
 - `file://`, 로컬 path, bytes는 로컬 절대경로 참조로 정규화됩니다.
 - tool-call 인자 strict 검증은 `output_schema` + `strict_output=True`로 보장됩니다.
-- 정책 프롬프트와 런타임 컨텍스트를 중복 주입하지 않으며, 런타임 제어 정보는 마지막 control message로 전달됩니다.
+- 런타임 컨텍스트는 system message에 포함되며, 전이/도구 제약은 schema 검증으로 강제됩니다.
 - 히스토리를 모델 입력으로 직렬화할 때 reasoning/tool_call/response(레거시 `tool_result` 포함) 기록을 유지하고, 로컬 이미지 참조는 다시 data URL로 변환됩니다.
 
 ## 이벤트 레퍼런스

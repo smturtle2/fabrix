@@ -128,7 +128,7 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 - `ToolOutput.image(...)`는 `http(s)`/`data:` 값을 그대로 유지합니다.
 - `ToolOutput.image(...)`는 `file://`, 로컬 path, bytes를 로컬 절대경로 참조로 정규화합니다.
 - tool-call 인자 strict 검증은 모델 `output_schema` + `strict_output=True`로 강제됩니다.
-- 정책 프롬프트와 런타임 컨텍스트는 중복 주입하지 않으며, 런타임 제어 정보는 마지막 control message로 전달됩니다.
+- 런타임 컨텍스트는 system message에 포함되며, 전이/도구 제약은 schema 검증으로 강제됩니다.
 - LLM 히스토리 직렬화 시 reasoning/tool_call/response(레거시 `tool_result` 포함) 기록을 유지하고, 로컬 이미지 참조는 다시 data URL로 정규화됩니다.
 
 ## 이벤트 스트림

@@ -86,7 +86,8 @@ class OAuthCodexStateProvider:
         serialized_history_messages = self._serialize_history_messages(history)
         developer_instructions = self._resolve_instructions()
         prompt = self._build_prompt(has_tools=bool(tool_schemas))
-        control_message = self._build_control_message(
+        system_message = self._build_system_message(
+            prompt=prompt,
             current_state=current_state,
             step=step,
             tool_schemas=tool_schemas,
@@ -100,10 +101,9 @@ class OAuthCodexStateProvider:
         try:
             payload = await self._client.agenerate(
                 messages=self._build_model_messages(
-                    prompt=prompt,
+                    system_message=system_message,
                     input_messages=serialized_messages,
                     history_messages=serialized_history_messages,
-                    control_message=control_message,
                 ),
                 model=self._model,
                 reasoning_effort=self._reasoning_effort,
@@ -305,8 +305,6 @@ class OAuthCodexStateProvider:
             f"Transition rules: {self._render_transition_rules()}.\n"
             "Decision policy:\n"
             "- Infer user intent, constraints, and missing information from input messages and history before selecting `next_state`.\n"
-            "- Runtime control context is provided in the final user message prefixed with `state_control:`.\n"
-            "- The `state_control` payload is authoritative for `current_state`, `step`, allowed transitions, tools, and developer instructions.\n"
             "Tool usage rules:\n"
             "- You MUST choose `tool_call` state only when external computation/data access is required.\n"
             "- In `tool_call` state, each `arguments` object must exactly match the selected tool schema.\n"
@@ -320,6 +318,7 @@ class OAuthCodexStateProvider:
             "Reasoning loop strategy:\n"
             "- Treat `reasoning` as a short decision journal, not free-form commentary.\n"
             "- Use `reasoning` to record what changed in this step (new evidence or decision delta), and use `focus` to define the immediate next check/action.\n"
+            "- When `next_state=reasoning`, continue from the previous step's decision delta and focus instead of restarting from scratch.\n"
             "- `focus` and `next_state` MUST be aligned: with `next_state=reasoning`, `focus` should be the next question/validation target; when transitioning, `focus` should be the immediate execution objective.\n"
             "- Prefer English in `reasoning` and `focus` for consistency; keep each reasoning step to 1-2 sentences.\n"
             "- Consider a task non-trivial when it involves multiple tools, competing constraints/objectives, ranking, or scenario comparison.\n"
@@ -328,6 +327,42 @@ class OAuthCodexStateProvider:
             "- If that challenge pass invalidates the transition reason, continue reasoning and refine the decision basis; if not, you may transition.\n"
             "- Transition to `tool_call`/`response` only after that reason is explicit.\n"
         )
+
+    def _build_system_message(
+        self,
+        *,
+        prompt: str,
+        current_state: NextState,
+        step: int,
+        tool_schemas: list[dict[str, Any]],
+        developer_instructions: str,
+    ) -> dict[str, Any]:
+        tool_names = [
+            name
+            for schema in tool_schemas
+            if isinstance(schema, dict)
+            for name in [schema.get("name")]
+            if isinstance(name, str) and name
+        ]
+        runtime_context = {
+            "current_state": current_state.value,
+            "step": step,
+            "allowed_next_states": [
+                *[next_state.value for next_state in allowed_next_states(current_state)],
+                *(["null"] if current_state is NextState.response else []),
+            ],
+            "tool_names": tool_names,
+        }
+        return {
+            "role": "system",
+            "content": (
+                f"{prompt}"
+                "Runtime context in this system message is authoritative.\n"
+                "Do not rely on hidden control channels.\n"
+                f"Runtime context JSON: {self._json_dumps(runtime_context)}\n"
+                f"Developer instructions:\n{developer_instructions}"
+            ),
+        }
 
     def _resolve_instructions(self) -> str:
         resolved = self._instructions() if callable(self._instructions) else self._instructions
@@ -362,52 +397,15 @@ class OAuthCodexStateProvider:
     def _build_model_messages(
         self,
         *,
-        prompt: str,
+        system_message: dict[str, Any],
         input_messages: list[dict[str, Any]],
         history_messages: list[dict[str, Any]],
-        control_message: dict[str, Any],
     ) -> list[dict[str, Any]]:
         return [
-            {"role": "system", "content": prompt},
+            system_message,
             *input_messages,
             *history_messages,
-            control_message,
         ]
-
-    def _build_control_message(
-        self,
-        *,
-        current_state: NextState,
-        step: int,
-        tool_schemas: list[dict[str, Any]],
-        developer_instructions: str,
-    ) -> dict[str, Any]:
-        tool_names = [
-            name
-            for schema in tool_schemas
-            if isinstance(schema, dict)
-            for name in [schema.get("name")]
-            if isinstance(name, str) and name
-        ]
-        payload = {
-            "current_state": current_state.value,
-            "step": step,
-            "allowed_next_states": [
-                *[next_state.value for next_state in allowed_next_states(current_state)],
-                *(["null"] if current_state is NextState.response else []),
-            ],
-            "tool_names": tool_names,
-            "developer_instructions": developer_instructions,
-        }
-        return {
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": f"state_control:{self._json_dumps(payload)}",
-                }
-            ],
-        }
 
     def _serialize_messages(self, messages: list[TextMessage | ImageMessage]) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []

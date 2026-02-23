@@ -417,7 +417,7 @@ class OAuthCodexStateProvider:
 
     def _build_prompt(self, *, has_tools: bool) -> str:
         no_tools_line = (
-            "No tools are registered. Avoid choosing `next_state=tool_call`.\n"
+            "No tools are registered. You MUST NOT choose `next_state=tool_call`.\n"
             if not has_tools
             else ""
         )
@@ -438,8 +438,12 @@ class OAuthCodexStateProvider:
             "- Align every decision and response with the instructions and runtime context.\n"
             "Tool rules:\n"
             "- Choose `tool_call` only when external computation or data access is required.\n"
-            "- In `tool_call` state, each `arguments` object must exactly match the selected tool schema.\n"
-            f"- In `tool_call` state, include between 1 and {MAX_TOOL_CALLS_PER_STEP} `tool_calls`.\n"
+            "- When `current_state=reasoning`, choose `next_state=tool_call` only when at least one ready call exists.\n"
+            f"- Emit only ready calls (1..{MAX_TOOL_CALLS_PER_STEP}) and keep each `arguments` object schema-valid.\n"
+            "- A call is ready only if all arguments are available now from input messages, constants, or successful tool results already in history.\n"
+            "- If a call needs another call's output, run the producer first and defer the dependent call; never use placeholder or guessed values.\n"
+            "- Use `why` briefly to note readiness/dependency when useful.\n"
+            "- When `current_state=reasoning` and no ready call exists yet, keep `next_state=reasoning` instead of forcing speculative `tool_call`.\n"
             f"{no_tools_line}"
             "Response rules:\n"
             "- `response` state may emit plain text (`response`), structured parts, both, or neither.\n"

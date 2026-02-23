@@ -1,3 +1,5 @@
+"""Public event models emitted by Fabrix agents."""
+
 from .models import (
     AgentEvent,
     BaseEvent,

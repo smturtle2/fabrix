@@ -13,9 +13,15 @@ from fabrix.graph.state import (
     StateEnvelope,
     ToolCallState,
 )
-from fabrix.llm.oauth_codex import OAuthCodexStateProvider
+from fabrix.llm.oauth_codex import DEFAULT_MODEL, OAuthCodexStateProvider
 from fabrix.messages import ImageMessage, TextMessage
 from fabrix.tools import ToolOutput
+
+_STATE_MODELS = {
+    "reasoning": "gpt-5.3-codex",
+    "tool_call": "gpt-5.3-codex",
+    "response": "gpt-5.3-codex",
+}
 
 
 class AddInput(BaseModel):
@@ -65,9 +71,18 @@ def test_agent_rejects_removed_init_parameters() -> None:
     with pytest.raises(TypeError):
         Agent(
             instructions="x",
-            model="gpt-5.3-codex",
+            state_models=_STATE_MODELS,
             tools=[add_numbers],
             max_steps=1,  # type: ignore[call-arg]
+        )
+
+
+def test_agent_rejects_removed_model_parameter() -> None:
+    with pytest.raises(TypeError):
+        Agent(
+            instructions="x",
+            model="gpt-5.3-codex",  # type: ignore[call-arg]
+            tools=[add_numbers],
         )
 
 
@@ -76,6 +91,8 @@ def test_agent_accepts_instruction_callable(monkeypatch: pytest.MonkeyPatch) -> 
 
     def fake_provider_init(self: OAuthCodexStateProvider, **kwargs: object) -> None:
         captured["instructions"] = kwargs["instructions"]
+        captured["default_model"] = kwargs["default_model"]
+        captured["state_models"] = kwargs["state_models"]
 
     def fake_validate_tool_schemas(
         self: OAuthCodexStateProvider, tool_schemas: list[dict[str, object]]
@@ -87,20 +104,46 @@ def test_agent_accepts_instruction_callable(monkeypatch: pytest.MonkeyPatch) -> 
 
     Agent(
         instructions=lambda: "Use strict policies.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
     instruction_source = captured["instructions"]
+    assert captured["default_model"] == DEFAULT_MODEL
+    assert captured["state_models"] == _STATE_MODELS
     assert callable(instruction_source)
     assert instruction_source() == "Use strict policies."
+
+
+def test_agent_forwards_custom_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_provider_init(self: OAuthCodexStateProvider, **kwargs: object) -> None:
+        captured["default_model"] = kwargs["default_model"]
+
+    def fake_validate_tool_schemas(
+        self: OAuthCodexStateProvider, tool_schemas: list[dict[str, object]]
+    ) -> None:
+        del self, tool_schemas
+
+    monkeypatch.setattr(OAuthCodexStateProvider, "__init__", fake_provider_init)
+    monkeypatch.setattr(OAuthCodexStateProvider, "validate_tool_schemas", fake_validate_tool_schemas)
+
+    Agent(
+        instructions="x",
+        default_model="gpt-5.3-codex-custom",
+        state_models=_STATE_MODELS,
+        tools=[add_numbers],
+    )
+
+    assert captured["default_model"] == "gpt-5.3-codex-custom"
 
 
 def test_agent_rejects_non_string_non_callable_instructions() -> None:
     with pytest.raises(TypeError, match="instructions must be a string or a callable returning a string"):
         Agent(
             instructions=123,  # type: ignore[arg-type]
-            model="gpt-5.3-codex",
+            state_models=_STATE_MODELS,
             tools=[add_numbers],
         )
 
@@ -109,7 +152,7 @@ def test_agent_rejects_non_string_non_callable_instructions() -> None:
 async def test_stream_rejects_when_messages_missing() -> None:
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -122,7 +165,7 @@ async def test_stream_rejects_when_messages_missing() -> None:
 async def test_stream_rejects_dict_messages() -> None:
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -151,7 +194,7 @@ async def test_stream_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch) 
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -183,7 +226,7 @@ async def test_stream_allows_empty_response_payload(monkeypatch: pytest.MonkeyPa
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -244,7 +287,7 @@ async def test_stream_preserves_response_parts_in_history(monkeypatch: pytest.Mo
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -283,7 +326,7 @@ async def test_stream_forwards_messages_to_state_provider(monkeypatch: pytest.Mo
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -326,7 +369,7 @@ async def test_response_none_terminates_without_extra_state_call(
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -366,7 +409,7 @@ async def test_stream_emits_events_in_expected_order(monkeypatch: pytest.MonkeyP
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -411,7 +454,7 @@ async def test_stream_executes_multiple_tools_sequentially(monkeypatch: pytest.M
 
     agent = Agent(
         instructions="Follow graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[slow_double],
     )
 
@@ -469,7 +512,7 @@ async def test_all_to_all_state_flow(monkeypatch: pytest.MonkeyPatch) -> None:
 
     agent = Agent(
         instructions="Follow graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -502,7 +545,7 @@ async def test_tool_errors_are_emitted(monkeypatch: pytest.MonkeyPatch) -> None:
 
     agent = Agent(
         instructions="Follow the graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -524,7 +567,7 @@ async def test_max_steps_without_response_emits_no_terminal_event(
 
     agent = Agent(
         instructions="Keep reasoning.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -563,7 +606,7 @@ async def test_retryable_llm_errors_are_retried(monkeypatch: pytest.MonkeyPatch)
 
     agent = Agent(
         instructions="Follow graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 
@@ -586,7 +629,7 @@ async def test_retryable_llm_errors_fail_after_retries(monkeypatch: pytest.Monke
 
     agent = Agent(
         instructions="Follow graph.",
-        model="gpt-5.3-codex",
+        state_models=_STATE_MODELS,
         tools=[add_numbers],
     )
 

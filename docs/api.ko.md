@@ -35,8 +35,9 @@ from fabrix.tools import ToolImagePart, ToolJSONPart, ToolOutput, ToolTextPart
 ```python
 Agent(
     *,
-    instructions: str,
-    model: str = "gpt-5.3-codex",
+    instructions: str | Callable[[], str],
+    default_model: str = "gpt-5.3-codex",
+    state_models: Mapping[NextState | str, str] | None = None,
     tools: list[Callable[..., Any]] | None = None,
 )
 ```
@@ -46,6 +47,12 @@ Agent(
 - 내부 실행 기본값: `max_steps=128`
 - public 생성자에 per-tool timeout 없음
 - 호환되지 않는 tool schema는 생성 시 즉시 실패
+- `model` 생성자 파라미터는 제거되었습니다(브레이킹).
+- `default_model`은 `state_models`에 없는 상태에 적용할 fallback 모델을 지정합니다.
+- `state_models` 키는 `NextState` 또는 문자열(`reasoning`, `tool_call`, `response`)을 허용합니다.
+- 지정되지 않은 state는 `default_model`(기본값 `gpt-5.3-codex`)로 fallback 됩니다.
+- 잘못된 state 키, 빈 모델 문자열, 충돌하는 중복 state 키는 즉시 실패합니다.
+- `default_model`은 비어있지 않은 문자열이어야 합니다.
 
 ## 메시지 모델
 
@@ -170,10 +177,12 @@ tool 실패는 non-terminal이며 `ToolEvent(phase="finish")`의 `result.ok == F
 제거된 API:
 
 - `run_task_stream(task, images, context)`
+- `Agent(..., model="...")`
 
 신규 API:
 
 - `run_stream(messages=[...])`
+- `Agent(..., state_models={...})`
 
 입력 매핑:
 
@@ -185,6 +194,11 @@ tool 반환값 매핑:
 
 - 이전: scalar/string/dict-like 값을 직접 반환
 - 현재: `ToolOutput.text(...)`, `ToolOutput.json(...)`, `ToolOutput.image(...)` 형태로 반환
+
+Agent 모델 매핑:
+
+- 이전: `Agent(instructions=..., model="gpt-5.3-codex", tools=[...])`
+- 현재: `Agent(instructions=..., state_models={"reasoning": "gpt-5.3-codex"}, tools=[...])`
 
 ## 트러블슈팅
 

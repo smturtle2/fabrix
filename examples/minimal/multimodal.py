@@ -44,7 +44,7 @@ async def main() -> None:
             "You are a visual analysis assistant. "
             "Use image evidence, state uncertainty clearly, and keep outputs compact."
         ),
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
     )
 
     python_logo_bytes = _load_image_bytes(PYTHON_LOGO_URL)

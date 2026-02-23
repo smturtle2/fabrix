@@ -652,6 +652,6 @@ def test_agent_preflight_fails_fast_for_incompatible_tool_schema(fake_client: An
     with pytest.raises(LLMOutputError, match="failed to strictify tool parameter schema"):
         Agent(
             instructions="x",
-            model="gpt-5.3-codex",
+            state_models={"reasoning": "gpt-5.3-codex"},
             tools=[consume_recursive],
         )

@@ -307,7 +307,7 @@ async def main() -> None:
             "Do not repeat the same tool call with identical arguments. "
             "When done, set response to render_decision_brief output and set next_state to null."
         ),
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
         tools=[
             filter_feasible_plans,
             rank_feasible_plans,

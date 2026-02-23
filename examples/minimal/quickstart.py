@@ -32,7 +32,7 @@ async def main() -> None:
             "Solve the task accurately. Prefer tool usage for arithmetic tasks. "
             "When done, return response state with next_state set to null."
         ),
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
         tools=[add_numbers],
     )
 

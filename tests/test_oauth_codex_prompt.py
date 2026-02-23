@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -7,8 +8,79 @@ import pytest
 
 from fabrix.graph.state import NextState
 from fabrix.graph.transitions import allowed_next_states
-from fabrix.llm.oauth_codex import OAuthCodexStateProvider
+from fabrix.llm.oauth_codex import DEFAULT_MODEL, OAuthCodexStateProvider
 from fabrix.messages import TextMessage
+
+_TOOL_SCHEMAS = [
+    {
+        "name": "echo",
+        "description": "Echo tool",
+        "parameters": {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+    }
+]
+
+
+class _StateAwareClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def agenerate(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        state_type = (
+            kwargs["output_schema"]["json_schema"]["schema"]["properties"]["state"]["properties"][
+                "state_type"
+            ]["enum"][0]
+        )
+
+        if state_type == "reasoning":
+            return {
+                "state": {
+                    "state_type": "reasoning",
+                    "next_state": "response",
+                    "reasoning": "done",
+                    "focus": "finalize",
+                }
+            }
+
+        if state_type == "tool_call":
+            return {
+                "state": {
+                    "state_type": "tool_call",
+                    "next_state": "response",
+                    "tool_calls": [{"name": "echo", "arguments": {"value": "ok"}}],
+                }
+            }
+
+        return {
+            "state": {
+                "state_type": "response",
+                "next_state": None,
+                "response": "done",
+                "parts": None,
+                "audience": "user",
+            }
+        }
+
+
+class _ConflictingStateModels(Mapping[NextState | str, str]):
+    def __getitem__(self, key: NextState | str) -> str:
+        if isinstance(key, NextState) and key is NextState.reasoning:
+            return "model-a"
+        if isinstance(key, str) and key == "reasoning":
+            return "model-b"
+        raise KeyError(key)
+
+    def __iter__(self):
+        yield NextState.reasoning
+        yield "reasoning"
+
+    def __len__(self) -> int:
+        return 2
 
 
 def _find_message_with_text(messages: list[dict[str, Any]], needle: str) -> dict[str, Any]:
@@ -154,6 +226,166 @@ async def test_provider_uses_low_reasoning_effort_by_default(fake_client: Any) -
     )
 
     assert fake_client.calls[-1]["reasoning_effort"] == "medium"
+
+
+@pytest.mark.asyncio
+async def test_provider_routes_model_per_state() -> None:
+    client = _StateAwareClient()
+    provider = OAuthCodexStateProvider(
+        instructions="x",
+        client=client,
+        state_models={
+            NextState.reasoning: "reasoning-model",
+            "tool_call": "tool-model",
+            NextState.response: "response-model",
+        },
+    )
+
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.tool_call,
+        step=2,
+        tool_schemas=_TOOL_SCHEMAS,
+    )
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.response,
+        step=3,
+        tool_schemas=[],
+    )
+
+    assert [call["model"] for call in client.calls] == [
+        "reasoning-model",
+        "tool-model",
+        "response-model",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_provider_uses_default_model_for_unset_state() -> None:
+    client = _StateAwareClient()
+    provider = OAuthCodexStateProvider(
+        instructions="x",
+        client=client,
+        state_models={"reasoning": "reasoning-model"},
+    )
+
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.response,
+        step=2,
+        tool_schemas=[],
+    )
+
+    assert [call["model"] for call in client.calls] == ["reasoning-model", DEFAULT_MODEL]
+
+
+@pytest.mark.asyncio
+async def test_provider_uses_custom_default_model_for_unset_state() -> None:
+    client = _StateAwareClient()
+    provider = OAuthCodexStateProvider(
+        instructions="x",
+        client=client,
+        default_model="gpt-5.3-codex-custom",
+        state_models={"reasoning": "reasoning-model"},
+    )
+
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.reasoning,
+        step=1,
+        tool_schemas=[],
+    )
+    await provider.generate_state(
+        messages=[TextMessage(role="user", text="hello")],
+        history=[],
+        current_state=NextState.response,
+        step=2,
+        tool_schemas=[],
+    )
+
+    assert [call["model"] for call in client.calls] == ["reasoning-model", "gpt-5.3-codex-custom"]
+
+
+def test_provider_rejects_empty_default_model(fake_client: Any) -> None:
+    with pytest.raises(ValueError, match="default_model must be a non-empty string"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            default_model="   ",
+        )
+
+
+def test_provider_rejects_non_string_default_model(fake_client: Any) -> None:
+    with pytest.raises(TypeError, match="default_model must be a non-empty string"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            default_model=123,  # type: ignore[arg-type]
+        )
+
+
+def test_provider_rejects_conflicting_state_model_keys(fake_client: Any) -> None:
+    with pytest.raises(ValueError, match="conflicting model mappings for state `reasoning`"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            state_models=_ConflictingStateModels(),
+        )
+
+
+def test_provider_rejects_unknown_state_model_key(fake_client: Any) -> None:
+    with pytest.raises(ValueError, match="unsupported state_models key"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            state_models={"reason": "model-a"},
+        )
+
+
+def test_provider_rejects_non_string_state_model_key(fake_client: Any) -> None:
+    with pytest.raises(TypeError, match="state_models keys must be NextState or string"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            state_models={1: "model-a"},  # type: ignore[dict-item]
+        )
+
+
+def test_provider_rejects_empty_state_model_value(fake_client: Any) -> None:
+    with pytest.raises(ValueError, match="state_models value for `reasoning` must be a non-empty string"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            state_models={"reasoning": "   "},
+        )
+
+
+def test_provider_rejects_non_string_state_model_value(fake_client: Any) -> None:
+    with pytest.raises(TypeError, match="state_models value for `reasoning` must be a non-empty string"):
+        OAuthCodexStateProvider(
+            instructions="x",
+            client=fake_client,
+            state_models={"reasoning": 123},  # type: ignore[dict-item]
+        )
 
 
 def test_prompt_includes_full_transition_rules(fake_client: Any) -> None:

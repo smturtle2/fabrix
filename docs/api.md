@@ -35,8 +35,9 @@ from fabrix.tools import ToolImagePart, ToolJSONPart, ToolOutput, ToolTextPart
 ```python
 Agent(
     *,
-    instructions: str,
-    model: str = "gpt-5.3-codex",
+    instructions: str | Callable[[], str],
+    default_model: str = "gpt-5.3-codex",
+    state_models: Mapping[NextState | str, str] | None = None,
     tools: list[Callable[..., Any]] | None = None,
 )
 ```
@@ -46,6 +47,12 @@ Notes:
 - Internal execution default: `max_steps=128`
 - No public per-tool timeout constructor option
 - Incompatible tool schemas fail fast at setup
+- `model` constructor parameter was removed (breaking).
+- `default_model` sets the fallback model used for states not present in `state_models`.
+- `state_models` keys accept `NextState` or string: `reasoning`, `tool_call`, `response`.
+- Unset states fall back to `default_model` (defaults to `gpt-5.3-codex`).
+- Invalid state keys, empty model strings, and conflicting duplicate state keys fail fast.
+- `default_model` must be a non-empty string.
 
 ## Message Models
 
@@ -170,10 +177,12 @@ Successful tool results expose typed payloads in `result.output: ToolOutput`.
 Removed API:
 
 - `run_task_stream(task, images, context)`
+- `Agent(..., model="...")`
 
 New API:
 
 - `run_stream(messages=[...])`
+- `Agent(..., state_models={...})`
 
 Input mapping:
 
@@ -185,6 +194,11 @@ Tool return mapping:
 
 - Before: tool returned scalar/string/dict-like outputs
 - After: tool must return `ToolOutput` via `ToolOutput.text(...)`, `ToolOutput.json(...)`, or `ToolOutput.image(...)`
+
+Agent model mapping:
+
+- Before: `Agent(instructions=..., model="gpt-5.3-codex", tools=[...])`
+- After: `Agent(instructions=..., state_models={"reasoning": "gpt-5.3-codex"}, tools=[...])`
 
 ## Troubleshooting
 

@@ -253,7 +253,7 @@ async def main() -> None:
             "immediately emit response state with next_state set to null and response equal to "
             "draft_external_update output."
         ),
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
         tools=[
             summarize_alerts,
             choose_primary_incident,

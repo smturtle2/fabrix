@@ -89,7 +89,7 @@ async def main() -> None:
             "After render_report succeeds, immediately emit response state with next_state "
             "set to null and response equal to render_report output."
         ),
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
         tools=[clean_records, aggregate_by_category, render_report],
     )
 

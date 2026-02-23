@@ -52,7 +52,7 @@ def add_numbers(payload: AddInput) -> ToolOutput:
 async def main() -> None:
     agent = Agent(
         instructions="You are a precise assistant.",
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
         tools=[add_numbers],
     )
 
@@ -80,6 +80,28 @@ async def main() -> None:
 
 
 asyncio.run(main())
+```
+
+## State Models
+
+Use `state_models` to override model per graph state (`reasoning`, `tool_call`, `response`).
+Keys accept `NextState` or exact string names.
+Any state not configured in `state_models` falls back to `default_model`
+(which defaults to `gpt-5.3-codex`).
+
+Example:
+
+```python
+agent = Agent(
+    instructions="You are a precise assistant.",
+    default_model="gpt-5.3-codex",
+    state_models={
+        "reasoning": "gpt-5.3-codex",
+        "tool_call": "gpt-5.3-codex",
+        "response": "gpt-5.3-codex",
+    },
+    tools=[add_numbers],
+)
 ```
 
 ## Message Models
@@ -151,6 +173,11 @@ Terminate by setting `next_state=null` in `response` state.
 
 - Before: `agent.run_task_stream(task=..., images=..., context=...)`
 - After: `agent.run_stream(messages=[...])`
+
+`Agent(..., model="...")` has been removed.
+
+- Before: `Agent(instructions=..., model="gpt-5.3-codex", tools=[...])`
+- After: `Agent(instructions=..., state_models={"reasoning": "gpt-5.3-codex"}, tools=[...])`
 
 Mapping:
 

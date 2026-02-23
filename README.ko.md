@@ -52,7 +52,7 @@ def add_numbers(payload: AddInput) -> ToolOutput:
 async def main() -> None:
     agent = Agent(
         instructions="You are a precise assistant.",
-        model="gpt-5.3-codex",
+        state_models={"reasoning": "gpt-5.3-codex"},
         tools=[add_numbers],
     )
 
@@ -80,6 +80,28 @@ async def main() -> None:
 
 
 asyncio.run(main())
+```
+
+## 상태별 모델 설정
+
+`state_models`를 사용하면 그래프 상태(`reasoning`, `tool_call`, `response`)별로 모델을 지정할 수 있습니다.
+키는 `NextState` 또는 정확한 문자열 이름을 허용합니다.
+`state_models`에서 빠진 상태는 `default_model`
+(기본값 `gpt-5.3-codex`)을 사용합니다.
+
+예시:
+
+```python
+agent = Agent(
+    instructions="You are a precise assistant.",
+    default_model="gpt-5.3-codex",
+    state_models={
+        "reasoning": "gpt-5.3-codex",
+        "tool_call": "gpt-5.3-codex",
+        "response": "gpt-5.3-codex",
+    },
+    tools=[add_numbers],
+)
 ```
 
 ## 메시지 모델
@@ -151,6 +173,11 @@ def tool(payload: BaseModel) -> ToolOutput: ...
 
 - 이전: `agent.run_task_stream(task=..., images=..., context=...)`
 - 현재: `agent.run_stream(messages=[...])`
+
+`Agent(..., model="...")`도 제거되었습니다.
+
+- 이전: `Agent(instructions=..., model="gpt-5.3-codex", tools=[...])`
+- 현재: `Agent(instructions=..., state_models={"reasoning": "gpt-5.3-codex"}, tools=[...])`
 
 매핑:
 

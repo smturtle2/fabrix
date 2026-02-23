@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, time
 from enum import Enum
 from typing import Any
@@ -51,14 +51,81 @@ class OAuthCodexStateProvider:
         *,
         instructions: str | Callable[[], str],
         client: OAuthCodexClient | None = None,
-        model: str = DEFAULT_MODEL,
+        default_model: str = DEFAULT_MODEL,
+        state_models: Mapping[NextState | str, str] | None = None,
         reasoning_effort: ReasoningEffort = "medium",
     ) -> None:
         self._client = client or OAuthCodexClient()
         self._instructions = instructions
-        self._model = model
+        self._default_model = self._normalize_default_model(default_model)
+        self._state_models = self._normalize_state_models(state_models)
         self._reasoning_effort = reasoning_effort
         self._output_schema_cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+    @staticmethod
+    def _normalize_default_model(default_model: str) -> str:
+        if not isinstance(default_model, str):
+            raise TypeError("default_model must be a non-empty string")
+        normalized = default_model.strip()
+        if not normalized:
+            raise ValueError("default_model must be a non-empty string")
+        return normalized
+
+    @classmethod
+    def _normalize_state_models(
+        cls,
+        state_models: Mapping[NextState | str, str] | None,
+    ) -> dict[NextState, str]:
+        if state_models is None:
+            return {}
+        if not isinstance(state_models, Mapping):
+            raise TypeError("state_models must be a mapping from NextState/string to model string")
+
+        normalized: dict[NextState, str] = {}
+        source_keys: dict[NextState, str] = {}
+
+        for raw_state, raw_model in state_models.items():
+            state = cls._normalize_state_model_key(raw_state)
+            model = cls._normalize_state_model_value(raw_model, state=state)
+
+            existing_model = normalized.get(state)
+            if existing_model is not None and existing_model != model:
+                first_key = source_keys[state]
+                raise ValueError(
+                    "conflicting model mappings for state "
+                    f"`{state.value}`: {first_key} -> `{existing_model}`, "
+                    f"{raw_state!r} -> `{model}`"
+                )
+
+            normalized[state] = model
+            source_keys[state] = repr(raw_state)
+
+        return normalized
+
+    @staticmethod
+    def _normalize_state_model_key(value: NextState | str) -> NextState:
+        if isinstance(value, NextState):
+            return value
+        if isinstance(value, str):
+            try:
+                return NextState(value)
+            except ValueError as exc:
+                raise ValueError(f"unsupported state_models key: {value!r}") from exc
+        raise TypeError("state_models keys must be NextState or string")
+
+    @staticmethod
+    def _normalize_state_model_value(value: str, *, state: NextState) -> str:
+        if not isinstance(value, str):
+            raise TypeError(f"state_models value for `{state.value}` must be a non-empty string")
+
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"state_models value for `{state.value}` must be a non-empty string")
+
+        return normalized
+
+    def _resolve_model_for_state(self, current_state: NextState) -> str:
+        return self._state_models.get(current_state, self._default_model)
 
     def validate_tool_schemas(self, tool_schemas: list[dict[str, Any]]) -> None:
         if tool_schemas:
@@ -106,7 +173,7 @@ class OAuthCodexStateProvider:
         try:
             payload = await self._client.agenerate(
                 messages=model_messages,
-                model=self._model,
+                model=self._resolve_model_for_state(current_state),
                 reasoning_effort=self._reasoning_effort,
                 output_schema=output_schema,
                 strict_output=True,

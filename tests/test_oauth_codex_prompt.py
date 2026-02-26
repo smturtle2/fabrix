@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from datetime import datetime
 from typing import Any
 
@@ -29,16 +30,30 @@ class _StateAwareClient:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def agenerate(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(kwargs)
-        state_type = (
-            kwargs["output_schema"]["json_schema"]["schema"]["properties"]["state"]["properties"][
-                "state_type"
-            ]["enum"][0]
-        )
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Any = None,
+        headers: Any = None,
+        json_data: Any = None,
+        data: Any = None,
+        files: Any = None,
+        timeout: Any = None,
+    ) -> Any:
+        assert method == "POST"
+        assert path == "/responses"
+        assert isinstance(json_data, dict)
+
+        self.calls.append(json_data)
+
+        state_type = json_data["text"]["format"]["schema"]["properties"]["state"]["properties"][
+            "state_type"
+        ]["enum"][0]
 
         if state_type == "reasoning":
-            return {
+            payload: dict[str, Any] = {
                 "state": {
                     "state_type": "reasoning",
                     "next_state": "response",
@@ -46,25 +61,37 @@ class _StateAwareClient:
                     "focus": "finalize",
                 }
             }
-
-        if state_type == "tool_call":
-            return {
+        elif state_type == "tool_call":
+            payload = {
                 "state": {
                     "state_type": "tool_call",
                     "next_state": "response",
                     "tool_calls": [{"name": "echo", "arguments": {"value": "ok"}}],
                 }
             }
-
-        return {
-            "state": {
-                "state_type": "response",
-                "next_state": None,
-                "response": "done",
-                "parts": None,
-                "audience": "user",
+        else:
+            payload = {
+                "state": {
+                    "state_type": "response",
+                    "next_state": None,
+                    "response": "done",
+                    "parts": None,
+                    "audience": "user",
+                }
             }
-        }
+
+        content = json.dumps(payload, ensure_ascii=True)
+        delta_event = json.dumps(
+            {"type": "response.output_text.delta", "delta": content},
+            ensure_ascii=True,
+        )
+        sse_text = f"event: response.output_text.delta\ndata: {delta_event}\n\n"
+
+        class _Resp:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        return _Resp(sse_text)
 
 
 class _ConflictingStateModels(Mapping[NextState | str, str]):
@@ -159,8 +186,8 @@ async def test_provider_resolves_instruction_callable_for_each_prompt(fake_clien
         tool_schemas=[],
     )
 
-    system_first = fake_client.calls[0]["messages"][0]["content"]
-    system_second = fake_client.calls[1]["messages"][0]["content"]
+    system_first = fake_client.calls[0]["instructions"]
+    system_second = fake_client.calls[1]["instructions"]
     assert isinstance(system_first, str)
     assert isinstance(system_second, str)
     assert "dynamic-1" in system_first
@@ -202,7 +229,9 @@ async def test_provider_rejects_instruction_callable_returning_non_string(fake_c
         client=fake_client,
     )
 
-    with pytest.raises(TypeError, match="instructions must be a string or a callable returning a string"):
+    with pytest.raises(
+        TypeError, match="instructions must be a string or a callable returning a string"
+    ):
         await provider.generate_state(
             messages=[TextMessage(role="user", text="hello")],
             history=[],
@@ -225,7 +254,7 @@ async def test_provider_uses_low_reasoning_effort_by_default(fake_client: Any) -
         tool_schemas=[],
     )
 
-    assert fake_client.calls[-1]["reasoning_effort"] == "medium"
+    assert fake_client.calls[-1]["reasoning"]["effort"] == "medium"
 
 
 @pytest.mark.asyncio
@@ -371,7 +400,9 @@ def test_provider_rejects_non_string_state_model_key(fake_client: Any) -> None:
 
 
 def test_provider_rejects_empty_state_model_value(fake_client: Any) -> None:
-    with pytest.raises(ValueError, match="state_models value for `reasoning` must be a non-empty string"):
+    with pytest.raises(
+        ValueError, match="state_models value for `reasoning` must be a non-empty string"
+    ):
         OAuthCodexStateProvider(
             instructions="x",
             client=fake_client,
@@ -380,7 +411,9 @@ def test_provider_rejects_empty_state_model_value(fake_client: Any) -> None:
 
 
 def test_provider_rejects_non_string_state_model_value(fake_client: Any) -> None:
-    with pytest.raises(TypeError, match="state_models value for `reasoning` must be a non-empty string"):
+    with pytest.raises(
+        TypeError, match="state_models value for `reasoning` must be a non-empty string"
+    ):
         OAuthCodexStateProvider(
             instructions="x",
             client=fake_client,
@@ -452,7 +485,7 @@ async def test_system_message_includes_instructions_and_runtime_context(
         tool_schemas=[],
     )
 
-    system_message = fake_client.calls[-1]["messages"][0]["content"]
+    system_message = fake_client.calls[-1]["instructions"]
     assert isinstance(system_message, str)
     assert "Use the runtime context and instructions below as primary directives." in system_message
     assert "Instructions:\npolicy" in system_message

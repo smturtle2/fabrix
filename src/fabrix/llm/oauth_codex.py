@@ -5,9 +5,9 @@ import json
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, time
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
-from oauth_codex import OAuthCodexClient
+from oauth_codex import AsyncClient
 from oauth_codex.tooling import build_strict_response_format
 from pydantic import BaseModel, ValidationError
 
@@ -45,17 +45,32 @@ _STATE_MODEL_BY_STATE: dict[
 }
 
 
+class _OAuthCodexAsyncClient(Protocol):
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+        json_data: Any = None,
+        data: Any = None,
+        files: Any = None,
+        timeout: float | None = None,
+    ) -> Any: ...
+
+
 class OAuthCodexStateProvider:
     def __init__(
         self,
         *,
         instructions: str | Callable[[], str],
-        client: OAuthCodexClient | None = None,
+        client: _OAuthCodexAsyncClient | None = None,
         default_model: str = DEFAULT_MODEL,
         state_models: Mapping[NextState | str, str] | None = None,
         reasoning_effort: ReasoningEffort = "medium",
     ) -> None:
-        self._client = client or OAuthCodexClient()
+        self._client: _OAuthCodexAsyncClient = client or AsyncClient()
         self._instructions = instructions
         self._default_model = self._normalize_default_model(default_model)
         self._state_models = self._normalize_state_models(state_models)
@@ -164,26 +179,91 @@ class OAuthCodexStateProvider:
             current_state=current_state,
             tool_schemas=tool_schemas,
         )
-        model_messages = self._build_model_messages(
-            system_message=system_message,
-            input_messages=serialized_messages,
-            history_messages=serialized_history_messages,
-        )
+        instructions = system_message.get("content")
+        if not isinstance(instructions, str) or not instructions.strip():
+            raise RetryableLLMOutputError("system instructions must be a non-empty string")
+
+        model_messages = [
+            *serialized_messages,
+            *serialized_history_messages,
+        ]
+
+        response_format = build_strict_response_format(output_schema)
+        payload = {
+            "model": self._resolve_model_for_state(current_state),
+            "input": model_messages,
+            "instructions": instructions,
+            "stream": True,
+            "store": False,
+            "text": {"format": response_format},
+            "reasoning": {"effort": self._reasoning_effort},
+        }
 
         try:
-            payload = await self._client.agenerate(
-                messages=model_messages,
-                model=self._resolve_model_for_state(current_state),
-                reasoning_effort=self._reasoning_effort,
-                output_schema=output_schema,
-                strict_output=True,
-            )
+            response = await self._client.request("POST", "/responses", json_data=payload)
         except Exception as exc:
-            raise RetryableLLMOutputError(
-                f"failed to produce valid state output: {exc}"
-            ) from exc
+            raise RetryableLLMOutputError(f"failed to produce valid state output: {exc}") from exc
 
-        return self._parse_payload(payload)
+        payload_text = self._extract_json_from_sse(response.text)
+        if not payload_text:
+            raise RetryableLLMOutputError(
+                "model returned empty streamed content for structured state"
+            )
+
+        return self._parse_payload(payload_text)
+
+    @staticmethod
+    def _extract_json_from_sse(sse_text: str) -> str:
+        if not isinstance(sse_text, str) or not sse_text.strip():
+            return ""
+
+        deltas: list[str] = []
+        completed_output_text: str | None = None
+
+        for block in sse_text.split("\n\n"):
+            if not block.strip():
+                continue
+
+            data_lines: list[str] = []
+            for line in block.splitlines():
+                if line.startswith("data:"):
+                    data_lines.append(line[len("data:") :].strip())
+
+            if not data_lines:
+                continue
+
+            raw_data = "\n".join(data_lines)
+            try:
+                data = json.loads(raw_data)
+            except Exception:
+                continue
+
+            if not isinstance(data, dict):
+                continue
+
+            event_type = data.get("type")
+            if event_type == "response.output_text.delta":
+                delta = data.get("delta")
+                if isinstance(delta, str) and delta:
+                    deltas.append(delta)
+                continue
+
+            if event_type == "response.completed":
+                response_obj = data.get("response")
+                if isinstance(response_obj, dict):
+                    output_text = response_obj.get("output_text")
+                    if isinstance(output_text, str) and output_text.strip():
+                        completed_output_text = output_text
+                continue
+
+            error = data.get("error")
+            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                return ""
+
+        candidate = "".join(deltas).strip()
+        if candidate:
+            return candidate
+        return (completed_output_text or "").strip()
 
     def _parse_payload(self, payload: str | dict[str, Any]) -> StateEnvelope:
         if isinstance(payload, str):
@@ -210,9 +290,7 @@ class OAuthCodexStateProvider:
         if parsed is not None:
             return parsed
 
-        raise RetryableLLMOutputError(
-            "model returned non-JSON text for structured state"
-        )
+        raise RetryableLLMOutputError("model returned non-JSON text for structured state")
 
     @staticmethod
     def _extract_markdown_fence_payload(payload: str) -> str | None:
@@ -409,9 +487,7 @@ class OAuthCodexStateProvider:
 
         rules: list[str] = []
         for allowed, from_states in grouped_rules.items():
-            rules.append(
-                f"{{ {' | '.join(from_states)} }} -> {{ {' | '.join(allowed)} }}"
-            )
+            rules.append(f"{{ {' | '.join(from_states)} }} -> {{ {' | '.join(allowed)} }}")
 
         return "; ".join(rules)
 
@@ -542,7 +618,9 @@ class OAuthCodexStateProvider:
             *history_messages,
         ]
 
-    def _serialize_messages(self, messages: list[TextMessage | ImageMessage]) -> list[dict[str, Any]]:
+    def _serialize_messages(
+        self, messages: list[TextMessage | ImageMessage]
+    ) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
         for message in messages:
             if not isinstance(message, (TextMessage, ImageMessage)):
@@ -585,8 +663,7 @@ class OAuthCodexStateProvider:
         next_state = item.get("next_state")
         reasoning = item.get("reasoning")
         summary = (
-            f"reasoning step={step} focus={focus or 'unknown'} "
-            f"next_state={next_state or 'unknown'}"
+            f"reasoning step={step} focus={focus or 'unknown'} next_state={next_state or 'unknown'}"
         )
         text = reasoning if isinstance(reasoning, str) and reasoning.strip() else ""
         return {
@@ -639,9 +716,7 @@ class OAuthCodexStateProvider:
             for result in tool_results:
                 if not isinstance(result, dict):
                     serialized.append(
-                        self._history_text_message(
-                            f"tool_result raw={self._json_dumps(result)}"
-                        )
+                        self._history_text_message(f"tool_result raw={self._json_dumps(result)}")
                     )
                     continue
                 message = self._serialize_tool_result_history(result)
@@ -686,9 +761,7 @@ class OAuthCodexStateProvider:
                 if part_type == "image":
                     caption = raw_part.get("caption")
                     if isinstance(caption, str) and caption.strip():
-                        content_parts.append(
-                            {"type": "output_text", "text": caption.strip()}
-                        )
+                        content_parts.append({"type": "output_text", "text": caption.strip()})
                     image_url = raw_part.get("image_url")
                     if isinstance(image_url, str) and image_url.strip():
                         try:
@@ -709,17 +782,14 @@ class OAuthCodexStateProvider:
                             )
                     continue
 
-                content_parts.append(
-                    {"type": "output_text", "text": self._json_dumps(raw_part)}
-                )
+                content_parts.append({"type": "output_text", "text": self._json_dumps(raw_part)})
 
         if not content_parts:
             content_parts.append(
                 {
                     "type": "output_text",
                     "text": (
-                        f"response step={step} next_state={next_state} "
-                        "response=null parts=null"
+                        f"response step={step} next_state={next_state} response=null parts=null"
                     ),
                 }
             )
@@ -926,7 +996,9 @@ class OAuthCodexStateProvider:
             values: set[str] = set()
             for idx, type_name in enumerate(schema_type):
                 if not isinstance(type_name, str):
-                    raise LLMOutputError(f"schema type list must contain only strings at {path}.type[{idx}]")
+                    raise LLMOutputError(
+                        f"schema type list must contain only strings at {path}.type[{idx}]"
+                    )
                 values.add(type_name)
             return values
 
@@ -946,9 +1018,7 @@ class OAuthCodexStateProvider:
                 f"object schema required/properties mismatch at {path}: {required} vs {list(properties.keys())}"
             )
         if additional_properties is not False:
-            raise LLMOutputError(
-                f"object schema must set additionalProperties=false at {path}"
-            )
+            raise LLMOutputError(f"object schema must set additionalProperties=false at {path}")
 
     def _assert_object_consistency(self, node: Any, path: str = "$") -> None:
         if isinstance(node, dict):

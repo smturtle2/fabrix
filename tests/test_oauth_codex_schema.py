@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -69,15 +70,42 @@ class _LooseJSONStringClient:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def agenerate(self, **kwargs: Any) -> Any:
-        self.calls.append(kwargs)
-        return (
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Any = None,
+        headers: Any = None,
+        json_data: Any = None,
+        data: Any = None,
+        files: Any = None,
+        timeout: Any = None,
+    ) -> Any:
+        assert method == "POST"
+        assert path == "/responses"
+        assert isinstance(json_data, dict)
+
+        self.calls.append(json_data)
+
+        payload = (
             "Here is the result.\n"
             "```json\n"
             '{"state":{"state_type":"reasoning","next_state":"response","reasoning":"done","focus":"finalize"}}\n'
             "```\n"
             "Use it."
         )
+        delta_event = json.dumps(
+            {"type": "response.output_text.delta", "delta": payload},
+            ensure_ascii=True,
+        )
+        sse_text = f"event: response.output_text.delta\ndata: {delta_event}\n\n"
+
+        class _Resp:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        return _Resp(sse_text)
 
 
 def test_tool_call_items_use_anyof_and_name_arguments_only(fake_client: Any) -> None:
@@ -190,8 +218,8 @@ async def test_provider_parses_fenced_json_from_string_payload() -> None:
     )
 
     assert len(client.calls) == 1
-    assert client.calls[0]["output_schema"] is not None
-    assert client.calls[0]["strict_output"] is True
+    assert isinstance(client.calls[0].get("text"), dict)
+    assert isinstance(client.calls[0]["text"].get("format"), dict)
     assert envelope.state.state_type == "reasoning"
     assert envelope.state.next_state == NextState.response
     assert envelope.state.reasoning == "done"
@@ -211,11 +239,11 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
         tool_schemas=tool_schemas,
     )
 
-    output_schema = fake_client.calls[-1]["output_schema"]
-    assert isinstance(output_schema, dict)
-    assert output_schema["type"] == "json_schema"
+    response_format = fake_client.calls[-1]["text"]["format"]
+    assert isinstance(response_format, dict)
+    assert response_format["type"] == "json_schema"
 
-    state_schema = output_schema["json_schema"]["schema"]["properties"]["state"]
+    state_schema = response_format["schema"]["properties"]["state"]
     state_type_schema = state_schema["properties"]["state_type"]
     assert state_type_schema.get("enum") == ["reasoning"]
     assert state_schema["properties"]["next_state"]["enum"] == [
@@ -229,8 +257,8 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
         step=2,
         tool_schemas=[],
     )
-    no_tool_output_schema = fake_client.calls[-1]["output_schema"]
-    no_tool_state_schema = no_tool_output_schema["json_schema"]["schema"]["properties"]["state"]
+    no_tool_response_format = fake_client.calls[-1]["text"]["format"]
+    no_tool_state_schema = no_tool_response_format["schema"]["properties"]["state"]
     assert no_tool_state_schema["properties"]["next_state"]["enum"] == [
         state.value for state in allowed_next_states(NextState.reasoning)
     ]
@@ -239,15 +267,17 @@ async def test_provider_uses_dynamic_output_schema(fake_client: Any) -> None:
 def test_response_schema_next_state_is_nullable(fake_client: Any) -> None:
     provider = OAuthCodexStateProvider(instructions="x", client=fake_client)
     schema = provider._build_output_schema(current_state=NextState.response, tool_schemas=[])
-    next_state_schema = schema["json_schema"]["schema"]["properties"]["state"]["properties"]["next_state"]
+    next_state_schema = schema["json_schema"]["schema"]["properties"]["state"]["properties"][
+        "next_state"
+    ]
     any_of = next_state_schema.get("anyOf")
     assert isinstance(any_of, list)
     assert any(item.get("type") == "null" for item in any_of if isinstance(item, dict))
-    non_null = [
-        item for item in any_of if isinstance(item, dict) and item.get("type") != "null"
-    ]
+    non_null = [item for item in any_of if isinstance(item, dict) and item.get("type") != "null"]
     assert len(non_null) == 1
-    assert non_null[0].get("enum") == [state.value for state in allowed_next_states(NextState.response)]
+    assert non_null[0].get("enum") == [
+        state.value for state in allowed_next_states(NextState.response)
+    ]
 
 
 @pytest.mark.asyncio
@@ -272,14 +302,15 @@ async def test_provider_passes_messages_to_client_in_order(fake_client: Any) -> 
     )
 
     sent_messages = fake_client.calls[-1]["messages"]
-    assert sent_messages[0]["role"] == "system"
-    assert isinstance(sent_messages[0]["content"], str)
-    assert [item["role"] for item in sent_messages[1:4]] == ["user", "user", "user"]
-    assert sent_messages[1]["content"] == "Describe this image"
-    content = sent_messages[2]["content"]
+    assert isinstance(fake_client.calls[-1]["instructions"], str)
+    assert fake_client.calls[-1]["instructions"].strip()
+
+    assert [item["role"] for item in sent_messages[0:3]] == ["user", "user", "user"]
+    assert sent_messages[0]["content"] == "Describe this image"
+    content = sent_messages[1]["content"]
     assert isinstance(content, list)
     assert [part["type"] for part in content] == ["input_text", "input_image"]
-    assert sent_messages[3]["content"] == "Focus on warnings"
+    assert sent_messages[2]["content"] == "Focus on warnings"
 
 
 @pytest.mark.asyncio
@@ -311,7 +342,9 @@ async def test_provider_appends_multimodal_history_image_parts(fake_client: Any)
     )
 
     sent_messages = fake_client.calls[-1]["messages"]
-    tool_result_message = _find_message_with_text(sent_messages, "tool_result step=2 tool=vision_tool")
+    tool_result_message = _find_message_with_text(
+        sent_messages, "tool_result step=2 tool=vision_tool"
+    )
     content = tool_result_message["content"]
     assert isinstance(content, list)
     assert [part["type"] for part in content] == ["input_text", "input_text", "input_image"]
@@ -351,7 +384,9 @@ async def test_provider_converts_local_image_history_part_to_data_url(
     )
 
     sent_messages = fake_client.calls[-1]["messages"]
-    tool_result_message = _find_message_with_text(sent_messages, "tool_result step=2 tool=vision_tool")
+    tool_result_message = _find_message_with_text(
+        sent_messages, "tool_result step=2 tool=vision_tool"
+    )
     content = tool_result_message["content"]
     assert isinstance(content, list)
     assert [part["type"] for part in content] == ["input_text", "input_image"]
@@ -391,7 +426,9 @@ async def test_provider_skips_missing_local_image_history_part_with_warning(
     )
 
     sent_messages = fake_client.calls[-1]["messages"]
-    tool_result_message = _find_message_with_text(sent_messages, "tool_result step=2 tool=vision_tool")
+    tool_result_message = _find_message_with_text(
+        sent_messages, "tool_result step=2 tool=vision_tool"
+    )
     content = tool_result_message["content"]
     assert isinstance(content, list)
     assert [part["type"] for part in content] == ["input_text", "input_text", "input_text"]
@@ -426,7 +463,9 @@ async def test_provider_appends_multimodal_history_text_and_json_parts(fake_clie
     )
 
     sent_messages = fake_client.calls[-1]["messages"]
-    tool_result_message = _find_message_with_text(sent_messages, "tool_result step=4 tool=formatter")
+    tool_result_message = _find_message_with_text(
+        sent_messages, "tool_result step=4 tool=formatter"
+    )
     content = tool_result_message["content"]
     assert isinstance(content, list)
     assert content[0]["type"] == "input_text"
@@ -504,7 +543,9 @@ async def test_provider_serializes_tool_call_history_with_tool_results(fake_clie
     tool_call_summary = _find_message_with_text(sent_messages, "tool_call step=2")
     summary_parts = tool_call_summary["content"]
     assert isinstance(summary_parts, list)
-    assert any("planned_tool_call name=vision_tool" in part.get("text", "") for part in summary_parts)
+    assert any(
+        "planned_tool_call name=vision_tool" in part.get("text", "") for part in summary_parts
+    )
     tool_result = _find_message_with_text(sent_messages, "tool_result step=2 tool=vision_tool")
     tool_result_parts = tool_result["content"]
     assert isinstance(tool_result_parts, list)
@@ -531,7 +572,11 @@ async def test_provider_serializes_reasoning_and_response_history(fake_client: A
                 "response": "intermediate",
                 "parts": [
                     {"type": "json", "data": {"a": 1}},
-                    {"type": "image", "image_url": "https://example.com/out.png", "caption": "preview"},
+                    {
+                        "type": "image",
+                        "image_url": "https://example.com/out.png",
+                        "caption": "preview",
+                    },
                 ],
             },
         ],
@@ -546,7 +591,10 @@ async def test_provider_serializes_reasoning_and_response_history(fake_client: A
     response_message = _find_message_with_text(sent_messages, "intermediate")
     response_parts = response_message["content"]
     assert isinstance(response_parts, list)
-    assert any(part.get("type") == "output_text" and part.get("text") == "preview" for part in response_parts)
+    assert any(
+        part.get("type") == "output_text" and part.get("text") == "preview"
+        for part in response_parts
+    )
     assert any(part.get("type") == "input_image" for part in response_parts)
 
 
